@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sahl POS | سهل - نظام البيع المتكامل والمبسط</title>
+    <script>
+      // Automatically patch WebSocket connections to localhost/3000 to prevent Mixed Content HMR warnings
+      if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+        const OriginalWebSocket = window.WebSocket;
+        window.WebSocket = function(url, protocols) {
+          if (typeof url === 'string' && (url.includes('localhost:') || url.includes('127.0.0.1:') || url.includes('::1'))) {
+            // Return a safe mock WebSocket that won't throw errors or trigger overlays
+            const mockWS = {
+              url: url,
+              readyState: 0, // CONNECTING
+              send: function() {},
+              close: function() {},
+              addEventListener: function() {},
+              removeEventListener: function() {},
+              dispatchEvent: function() { return true; }
+            };
+            // Transition to status CLOSED/discharged silently to prevent any console noise
+            setTimeout(() => {
+              if (mockWS.onerror) {
+                try { mockWS.onerror(new Event('error')); } catch(e) {}
+              }
+              if (mockWS.onclose) {
+                try { mockWS.onclose({ code: 1006, reason: 'Silent cloud bypass', wasClean: false }); } catch(e) {}
+              }
+            }, 150);
+            return mockWS;
+          }
+          return new OriginalWebSocket(url, protocols);
+        };
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

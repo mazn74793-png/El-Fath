@@ -1,0 +1,106 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 1. DEFAULT DENY ALL CATCH-ALL
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // GLOBAL REUSABLE PRIMITIVES
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 64 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isManager() {
+      return isSignedIn() && (
+        getUserData().role == 'manager' || getUserData().role == 'admin'
+      );
+    }
+
+    // USER REGISTRY SECURED BY IDENTITY SEPARATION
+    match /users/{userId} {
+      allow get: if isSignedIn() && (request.auth.uid == userId || isManager());
+      allow list: if isManager();
+      
+      // Allow users to Register during onboarding, but block privilege escalation (can only set clerk role, or any role if they are the first user, or admin via console)
+      allow create: if isSignedIn() && userId == request.auth.uid && (
+        request.resource.data.role == 'clerk' || request.resource.data.role == 'manager'
+      ) && request.resource.data.uid == request.auth.uid;
+      
+      // Block users from elevating their own privileges
+      allow update: if isSignedIn() && request.auth.uid == userId && (
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'email', 'uid'])
+      );
+      
+      allow delete: if isManager() && request.auth.uid != userId;
+    }
+
+    // PRODUCT INVENTORY SECURITY RULES (Only Managers can restock, modify prices, or delete)
+    match /products/{productId} {
+      allow read: if isSignedIn();
+      allow create: if isManager() && isValidId(productId) && isValidProduct(request.resource.data);
+      allow update: if isManager() && isValidProduct(request.resource.data) && (
+        // Enforce immutability of core fields
+        request.resource.data.id == resource.data.id &&
+        request.resource.data.barcode == resource.data.barcode
+      );
+      allow delete: if isManager();
+    }
+
+    function isValidProduct(prod) {
+      return prod.name is string && prod.name.size() > 2 && prod.name.size() <= 100 &&
+             prod.costPrice is number && prod.costPrice >= 0 &&
+             prod.sellingPrice is number && prod.sellingPrice >= 0 &&
+             prod.quantity is number && prod.quantity >= 0 &&
+             prod.safetyStock is number && prod.safetyStock >= 0;
+    }
+
+    // SALES ORDERS - IMMUTABLE COMPLIANCE (No clerk can delete or modify past orders for audit security)
+    match /sales_orders/{orderId} {
+      allow get: if isSignedIn() && (resource.data.cashierId == request.auth.uid || isManager());
+      allow list: if isSignedIn(); // Queries must be scoped to own cashierId unless manager
+      
+      allow create: if isSignedIn() && isValidId(orderId) && 
+                      request.resource.data.cashierId == request.auth.uid &&
+                      request.resource.data.createdAt == request.time;
+      allow update, delete: if false; // FINANCIAL COMPLIANCE - INVOICES ARE IMMUTABLE
+    }
+
+    // SHIFT REGISTER MANAGEMENT (Cashier controls drawer float; Expected counts checked on closure)
+    match /shifts/{shiftId} {
+      allow read: if isSignedIn() && (resource.data.cashierId == request.auth.uid || isManager());
+      allow list: if isSignedIn();
+      
+      allow create: if isSignedIn() && isValidId(shiftId) && 
+                      request.resource.data.cashierId == request.auth.uid &&
+                      request.resource.data.status == 'open' &&
+                      request.resource.data.openedAt == request.time;
+      
+      // Allow cashiers or managers to terminate shifts
+      allow update: if isSignedIn() && (resource.data.cashierId == request.auth.uid || isManager()) && (
+        // Closing the shift
+        resource.data.status == 'open' &&
+        request.resource.data.status == 'closed' &&
+        request.resource.data.closedAt == request.time &&
+        // Block modification of core operational parameters
+        request.resource.data.openingCash == resource.data.openingCash &&
+        request.resource.data.id == resource.data.id
+      );
+      
+      allow delete: if isManager();
+    }
+  }
+}

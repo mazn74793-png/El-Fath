@@ -1,0 +1,6 @@
+{
+  "name": "POS & Inventory Suite",
+  "description": "A production-ready, high-performance POS and Inventory Management Web App optimized for retail shops and pharmacies with offline-first capabilities and shift tracking.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
