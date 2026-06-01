@@ -598,7 +598,7 @@ export default function App() {
             <div className="flex items-center gap-2.5">
               <div className="w-10 h-10 shrink-0 rounded-xl overflow-hidden shadow-xs border border-emerald-600/30 bg-slate-950 flex items-center justify-center">
                 <img 
-                  src="/src/assets/images/al_fath_logo_1780318413090.png" 
+                  src="/logo.png" 
                   alt={lang === 'en' ? 'Al-Fath POS Logo' : 'شعار الفتح POS'} 
                   className="w-full h-full object-cover"
                   referrerPolicy="no-referrer"
