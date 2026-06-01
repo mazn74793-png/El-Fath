@@ -38,8 +38,8 @@ import POS from './components/POS';
 import ShiftManager from './components/ShiftManager';
 import SyncHub from './components/SyncHub';
 import AdminPortal from './components/AdminPortal';
-
 export default function App() {
+
   const [userRole, setUserRole] = useState<'admin' | 'cashier'>(() => {
     const saved = localStorage.getItem('pos_user_role');
     return (saved === 'admin' || saved === 'cashier') ? saved : 'admin';
@@ -65,6 +65,41 @@ export default function App() {
   const [pinInput, setPinInput] = useState('');
   const [isPromptingPin, setIsPromptingPin] = useState(false);
   const [pinError, setPinError] = useState(false);
+
+  // Bind physical keyboard events to typing the manager PIN
+  useEffect(() => {
+    if (!isPromptingPin) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key >= '0' && e.key <= '9') {
+        setPinError(false);
+        setPinInput(prev => {
+          const next = prev + e.key;
+          if (next.length === 4) {
+            if (next === '2222') {
+              setUserRole('admin');
+              localStorage.setItem('pos_user_role', 'admin');
+              setActiveTab('dashboard');
+              setIsPromptingPin(false);
+              return '';
+            } else {
+              setPinError(true);
+              return '';
+            }
+          }
+          return next;
+        });
+      } else if (e.key === 'Backspace') {
+        setPinError(false);
+        setPinInput(p => p.slice(0, -1));
+      } else if (e.key === 'Escape') {
+        setIsPromptingPin(false);
+        setPinInput('');
+        setPinError(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isPromptingPin]);
 
   // Enforce tab access control for cashier
   useEffect(() => {
@@ -561,8 +596,13 @@ export default function App() {
           {/* Logo Brand Header */}
           <div className="p-5 border-b border-[#E5E7EB] flex items-center justify-between bg-emerald-50/20">
             <div className="flex items-center gap-2.5">
-              <div className="w-10 h-10 bg-emerald-600 rounded-xl flex items-center justify-center text-white font-black text-xl shadow-xs">
-                {lang === 'ar' ? 'ف' : 'F'}
+              <div className="w-10 h-10 shrink-0 rounded-xl overflow-hidden shadow-xs border border-emerald-600/30 bg-slate-950 flex items-center justify-center">
+                <img 
+                  src="/src/assets/images/al_fath_logo_1780318413090.png" 
+                  alt={lang === 'en' ? 'Al-Fath POS Logo' : 'شعار الفتح POS'} 
+                  className="w-full h-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
               </div>
               <div>
                 <h1 className="text-sm font-bold tracking-tight text-gray-950 leading-none uppercase">
@@ -657,107 +697,52 @@ export default function App() {
         <div id="footer-language-sync" className="p-4 border-t border-[#E5E7EB] space-y-3 bg-[#FAFAFA]">
           
           {/* SECURE ROLE SWITCHER COMPONENT */}
-          <div className="bg-white p-3 rounded-xl border border-[#E5E7EB] space-y-2 text-xs">
+          <div className="bg-white p-3 rounded-xl border border-[#E5E7EB] space-y-2 text-xs border-r-4 border-r-indigo-605 shadow-xs">
             <div className="flex items-center justify-between">
-              <span className="font-bold text-gray-700">
+              <span className="font-extrabold text-gray-800 text-[11px]">
                 {lang === 'en' ? 'Interface Mode' : 'واجهة استخدام النظام'}
               </span>
               <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold select-none uppercase ${
                 userRole === 'admin' ? 'bg-indigo-50 text-indigo-600 border border-indigo-100' : 'bg-emerald-50 text-emerald-600 border border-emerald-100'
               }`}>
                 {userRole === 'admin' 
-                  ? (lang === 'en' ? 'Manager (Full)' : 'المدير (كامل)') 
-                  : (lang === 'en' ? 'Cashier (Easy)' : 'كاشير مبسط')}
+                  ? (lang === 'en' ? 'Manager' : 'المدير') 
+                  : (lang === 'en' ? 'Cashier' : 'الكاشير')}
               </span>
             </div>
 
-            {isPromptingPin ? (
-              <div className="space-y-2 mt-1 pt-1 border-t border-gray-100">
-                <p className="text-[10px] text-gray-500 leading-tight">
-                  {lang === 'en' ? 'Enter Admin PIN to unlock (Default: 1234):' : 'أدخل رمز المدير لفتح لوحة التحكم (الافتراضي: 1234):'}
-                </p>
-                <div className="flex gap-1" dir="ltr">
-                  <input
-                    type="password"
-                    maxLength={6}
-                    value={pinInput}
-                    onChange={(e) => {
-                      setPinInput(e.target.value);
-                      setPinError(false);
-                    }}
-                    placeholder="••••"
-                    className={`w-20 px-2 py-1 border rounded text-center text-xs font-mono focus:outline-hidden ${
-                      pinError ? 'border-red-500 bg-red-50' : 'border-gray-200'
-                    }`}
-                  />
-                  <button
-                    onClick={() => {
-                      if (pinInput === '1234') {
-                        setUserRole('admin');
-                        localStorage.setItem('pos_user_role', 'admin');
-                        setActiveTab('dashboard');
-                        setIsPromptingPin(false);
-                        setPinInput('');
-                        setPinError(false);
-                      } else {
-                        setPinError(true);
-                      }
-                    }}
-                    className="flex-1 bg-black text-white rounded font-semibold text-[10px] py-1"
-                  >
-                    {lang === 'en' ? 'OK' : 'دخول'}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setIsPromptingPin(false);
-                      setPinInput('');
-                      setPinError(false);
-                    }}
-                    className="px-2 bg-gray-100 text-gray-600 rounded text-[10px] py-1"
-                  >
-                    {lang === 'en' ? 'Cancel' : 'إلغاء'}
-                  </button>
-                </div>
-                {pinError && (
-                  <p className="text-[10px] text-red-600 font-bold leading-none mt-1">
-                    {lang === 'en' ? 'Incorrect PIN' : 'الرمز غير صحيح'}
-                  </p>
-                )}
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 gap-1 mt-1 bg-gray-100 p-0.5 rounded-lg border border-gray-200 select-none">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (userRole !== 'cashier') {
-                      setUserRole('cashier');
-                      localStorage.setItem('pos_user_role', 'cashier');
-                      setActiveTab('pos');
-                    }
-                  }}
-                  className={`flex items-center justify-center gap-1.5 py-1 px-1.5 rounded-md transition text-[10px] font-bold ${
-                    userRole === 'cashier' ? 'bg-white text-emerald-600 shadow-xs' : 'text-gray-500 hover:text-black'
-                  }`}
-                >
-                  <User size={12} />
-                  <span>{lang === 'en' ? 'Cashier' : 'كاشير مبسط'}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (userRole !== 'admin') {
-                      setIsPromptingPin(true);
-                    }
-                  }}
-                  className={`flex items-center justify-center gap-1.5 py-1 px-1.5 rounded-md transition text-[10px] font-bold ${
-                    userRole === 'admin' ? 'bg-white text-indigo-600 shadow-xs' : 'text-gray-500 hover:text-black'
-                  }`}
-                >
-                  <Shield size={12} />
-                  <span>{lang === 'en' ? 'Manager' : 'مدير الأعمال'}</span>
-                </button>
-              </div>
-            )}
+            <div className="grid grid-cols-2 gap-1 mt-1 bg-gray-100 p-0.5 rounded-lg border border-gray-200 select-none">
+              <button
+                type="button"
+                onClick={() => {
+                  if (userRole !== 'cashier') {
+                    setUserRole('cashier');
+                    localStorage.setItem('pos_user_role', 'cashier');
+                    setActiveTab('pos');
+                  }
+                }}
+                className={`flex items-center justify-center gap-1.5 py-1 px-1.5 rounded-md transition text-[10px] font-bold cursor-pointer ${
+                  userRole === 'cashier' ? 'bg-white text-emerald-600 shadow-xs' : 'text-gray-500 hover:text-black'
+                }`}
+              >
+                <User size={12} />
+                <span>{lang === 'en' ? 'Cashier' : 'كاشير مبسط'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (userRole !== 'admin') {
+                    setIsPromptingPin(true);
+                  }
+                }}
+                className={`flex items-center justify-center gap-1.5 py-1 px-1.5 rounded-md transition text-[10px] font-bold cursor-pointer ${
+                  userRole === 'admin' ? 'bg-white text-indigo-600 shadow-xs' : 'text-gray-500 hover:text-black'
+                }`}
+              >
+                <Shield size={12} />
+                <span>{lang === 'en' ? 'Manager' : 'مدير الأعمال'}</span>
+              </button>
+            </div>
           </div>
 
           {/* App Install Trigger Button */}
@@ -1168,6 +1153,160 @@ export default function App() {
                   {lang === 'ar' ? 'الفتح دوت كوم • فوري مئة بالمائة' : 'Al-Fath POS • Standalone Offline App'}
                 </span>
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 4. SECURED MANAGER PIN ACCESS NUMERIC KEYPAD DIALER MODAL */}
+      <AnimatePresence>
+        {isPromptingPin && (
+          <div className="fixed inset-0 bg-black/75 backdrop-blur-md flex items-center justify-center p-4 z-50 overflow-y-auto">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-3xl shadow-2xl border border-gray-150 p-6 max-w-sm w-full relative outline-hidden select-none"
+              dir={lang === 'ar' ? 'rtl' : 'ltr'}
+            >
+              <div className="text-center space-y-2 mb-6">
+                <div className="inline-flex p-3.5 bg-indigo-50 rounded-2xl text-indigo-650 mb-2">
+                  <Shield size={28} className="animate-pulse" />
+                </div>
+                <h3 className="text-base font-black tracking-tight text-gray-950">
+                  {lang === 'ar' ? '🔑 تفعيل وضع المدير' : '🔑 Secured Manager Access'}
+                </h3>
+                <p className="text-xs text-gray-500 max-w-xs mx-auto leading-relaxed">
+                  {lang === 'ar' 
+                    ? 'الرجاء إدخال الرمز السري المكون من 4 أرقام للمتابعة وتغيير الأسعار والبيانات.' 
+                    : 'Please enter the 4-digit manager PIN to unlock dashboard and catalog pricing.'}
+                </p>
+              </div>
+
+              {/* PIN BULLETS PROGRESS */}
+              <div className="flex justify-center gap-4 py-4 mb-6" dir="ltr">
+                {[0, 1, 2, 3].map((index) => {
+                  const hasValue = pinInput.length > index;
+                  return (
+                    <motion.div
+                      key={index}
+                      animate={{
+                        scale: hasValue ? 1.2 : 1,
+                        backgroundColor: pinError ? '#EF4444' : hasValue ? '#4F46E5' : '#E5E7EB'
+                      }}
+                      className="w-4.5 h-4.5 rounded-full border border-gray-250 shadow-inner"
+                    />
+                  );
+                })}
+              </div>
+
+              {/* ERROR MESSAGE PANEL */}
+              {pinError && (
+                <motion.p
+                  initial={{ opacity: 0, y: -5 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="text-red-655 text-center text-xs font-bold mb-4"
+                >
+                  {lang === 'ar' ? '⚠️ الرمز السري خاطئ! يرجى المحاولة مجدداً.' : '⚠️ Incorrect PIN! Please try again.'}
+                </motion.p>
+              )}
+
+              {/* TACTILE DIGIT KEYPAD */}
+              <div className="grid grid-cols-3 gap-3 mb-6" dir="ltr">
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
+                  <button
+                    key={num}
+                    type="button"
+                    onClick={() => {
+                      setPinError(false);
+                      if (pinInput.length < 4) {
+                        const next = pinInput + num;
+                        setPinInput(next);
+                        if (next.length === 4) {
+                          if (next === '2222') {
+                            setUserRole('admin');
+                            localStorage.setItem('pos_user_role', 'admin');
+                            setActiveTab('dashboard');
+                            setIsPromptingPin(false);
+                            setPinInput('');
+                          } else {
+                            setPinError(true);
+                            setPinInput('');
+                          }
+                        }
+                      }
+                    }}
+                    className="h-14 bg-gray-50 hover:bg-indigo-50 border border-gray-150 hover:border-indigo-200 active:bg-indigo-100 rounded-2xl font-sans text-xl font-bold text-gray-800 hover:text-indigo-700 transition active:scale-95 cursor-pointer shadow-xs"
+                  >
+                    {num}
+                  </button>
+                ))}
+                
+                {/* Clear Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPinInput('');
+                    setPinError(false);
+                  }}
+                  className="h-14 bg-red-50 hover:bg-red-100 border border-red-100 rounded-2xl font-sans text-xs font-extrabold text-red-650 hover:text-red-700 transition active:scale-95 cursor-pointer shadow-xs uppercase"
+                >
+                  {lang === 'ar' ? 'مسح' : 'Clear'}
+                </button>
+                
+                {/* 0 Button */}
+                <button
+                  key={0}
+                  type="button"
+                  onClick={() => {
+                    setPinError(false);
+                    if (pinInput.length < 4) {
+                      const next = pinInput + '0';
+                      setPinInput(next);
+                      if (next.length === 4) {
+                        if (next === '2222') {
+                          setUserRole('admin');
+                          localStorage.setItem('pos_user_role', 'admin');
+                          setActiveTab('dashboard');
+                          setIsPromptingPin(false);
+                          setPinInput('');
+                        } else {
+                          setPinError(true);
+                          setPinInput('');
+                        }
+                      }
+                    }
+                  }}
+                  className="h-14 bg-gray-50 hover:bg-indigo-50 border border-gray-150 hover:border-indigo-200 active:bg-indigo-100 rounded-2xl font-sans text-xl font-bold text-gray-800 hover:text-indigo-700 transition active:scale-95 cursor-pointer shadow-xs"
+                >
+                  0
+                </button>
+
+                {/* Backspace Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPinInput(p => p.slice(0, -1));
+                    setPinError(false);
+                  }}
+                  className="h-14 bg-gray-100 hover:bg-gray-200 border border-gray-200 rounded-2xl font-sans text-lg font-bold text-gray-700 transition active:scale-95 cursor-pointer shadow-xs flex items-center justify-center"
+                >
+                  ⌫
+                </button>
+              </div>
+
+              {/* ACTION BACK BUTTONS */}
+              <button
+                type="button"
+                onClick={() => {
+                  setIsPromptingPin(false);
+                  setPinInput('');
+                  setPinError(false);
+                }}
+                className="w-full py-3 bg-gray-100 hover:bg-gray-150 text-gray-700 rounded-2xl text-xs font-black tracking-wide transition active:scale-98 cursor-pointer border border-gray-200 select-none text-center"
+              >
+                {lang === 'ar' ? 'الرجوع لوضع الكاشير' : 'Cancel & Stay Cashier'}
+              </button>
             </motion.div>
           </div>
         )}
