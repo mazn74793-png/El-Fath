@@ -1,14 +1,42 @@
 {
   "name": "react-example",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
+  "main": "main.cjs",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
     "build": "vite build",
     "preview": "vite preview",
-    "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "clean": "rm -rf dist server.js dist-electron",
+    "lint": "tsc --noEmit",
+    "electron:start": "NODE_ENV=development electron .",
+    "electron:package": "vite build && electron-builder --windows"
+  },
+  "build": {
+    "appId": "com.alfath.pos",
+    "productName": "Al-Fath POS",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "dist/**/*",
+      "main.cjs",
+      "preload.js",
+      "public/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "public/logo.png",
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick": true,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "الفتح لقطع غيار الأجهزة المنزلية"
+    }
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -30,6 +58,8 @@
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.3",
-    "@types/express": "^4.17.21"
+    "@types/express": "^4.17.21",
+    "electron": "^22.3.25",
+    "electron-builder": "^24.13.0"
   }
 }
