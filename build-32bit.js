@@ -8,11 +8,30 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 async function downloadElectron() {
-  const url = 'https://github.com/electron/electron/releases/download/v22.3.27/electron-v22.3.27-win32-ia32.zip';
+  const url = 'https://github.com/electron/electron/releases/download/v21.4.0/electron-v21.4.0-win32-ia32.zip';
   const outputPath = path.join(__dirname, 'electron-ia32.zip');
-  
-  if (fs.existsSync(outputPath)) {
-    console.log('Zip file electron-ia32.zip already downloaded, skipping download...');
+  const markerPath = path.join(__dirname, 'electron-version.txt');
+  const targetVersion = 'v21.4.0';
+  let needsRedownload = true;
+
+  if (fs.existsSync(markerPath)) {
+    const cachedVer = fs.readFileSync(markerPath, 'utf8').trim();
+    if (cachedVer === targetVersion && fs.existsSync(outputPath)) {
+      needsRedownload = false;
+    }
+  }
+
+  if (needsRedownload) {
+    console.log('Forcing download of correct Windows 7-compatible version:', targetVersion);
+    if (fs.existsSync(outputPath)) {
+      try {
+        fs.unlinkSync(outputPath);
+      } catch (err) {
+        console.error('Failed to clear old zip file, will overwrite:', err);
+      }
+    }
+  } else {
+    console.log(`Zip file for ${targetVersion} already downloaded, skipping download...`);
     return;
   }
   
@@ -26,6 +45,7 @@ async function downloadElectron() {
   const arrayBuffer = await response.arrayBuffer();
   const buffer = Buffer.from(arrayBuffer);
   fs.writeFileSync(outputPath, buffer);
+  fs.writeFileSync(markerPath, targetVersion);
   
   console.log('Download finished successfully!');
 }

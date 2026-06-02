@@ -10,6 +10,7 @@ function createWindow() {
     minWidth: 1024,
     minHeight: 768,
     title: "الفتح لقطع غيار الأجهزة المنزلية - Al-Fath POS",
+    fullscreen: true, // Open in full-screen automatically on desktop start
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
