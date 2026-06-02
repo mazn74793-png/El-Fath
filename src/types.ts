@@ -84,11 +84,29 @@ export interface Shop {
 
 export interface SyncItem {
   id: string;
-  collection: 'products' | 'sales_orders' | 'shifts' | 'users';
+  collection: 'products' | 'sales_orders' | 'shifts' | 'users' | 'repairs';
   action: 'create' | 'update' | 'delete';
   documentId: string;
   payload: any;
   timestamp: string;
+}
+
+export interface RepairOrder {
+  id: string;
+  clientName: string;
+  clientPhone: string;
+  deviceName: string;
+  problemDetails: string;
+  partsNeeded: string;
+  cost: number;
+  deposit: number;
+  isDepositPaid: boolean;
+  status: 'pending' | 'in_progress' | 'ready' | 'delivered';
+  notes: string;
+  receivedDate: string;
+  expectedDeliveryDate: string;
+  shopId: string;
+  updatedAt: string;
 }
 
 export interface DatabaseState {
@@ -96,4 +114,5 @@ export interface DatabaseState {
   products: Record<string, Product>;
   sales_orders: Record<string, SalesOrder>;
   shifts: Record<string, Shift>;
+  repairs: Record<string, RepairOrder>;
 }

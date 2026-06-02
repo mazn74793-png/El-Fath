@@ -27,10 +27,12 @@ import {
   Smartphone,
   Info,
   Maximize,
-  Minimize
+  Minimize,
+  Wrench,
+  Bell
 } from 'lucide-react';
 
-import { Product, SalesOrder, Shift, SyncItem, Shop } from './types';
+import { Product, SalesOrder, Shift, SyncItem, Shop, RepairOrder } from './types';
 import { INITIAL_PRODUCTS } from './data';
 
 // Component imports
@@ -40,6 +42,7 @@ import POS from './components/POS';
 import ShiftManager from './components/ShiftManager';
 import SyncHub from './components/SyncHub';
 import AdminPortal from './components/AdminPortal';
+import Repairs from './components/Repairs';
 export default function App() {
 
   // Always default strictly to cashier upon page entry/reload to prevent unauthorized entry
@@ -127,7 +130,7 @@ export default function App() {
 
   // Enforce tab access control for cashier
   useEffect(() => {
-    if (userRole === 'cashier' && activeTab !== 'pos' && activeTab !== 'shifts') {
+    if (userRole === 'cashier' && activeTab !== 'pos' && activeTab !== 'shifts' && activeTab !== 'repairs') {
       setActiveTab('pos');
     }
   }, [userRole, activeTab]);
@@ -143,6 +146,7 @@ export default function App() {
   const [orders, setOrders] = useState<SalesOrder[]>([]);
   const [activeShift, setActiveShift] = useState<Shift | null>(null);
   const [historicalShifts, setHistoricalShifts] = useState<Shift[]>([]);
+  const [repairs, setRepairs] = useState<RepairOrder[]>([]);
   
   // Multi-shop/branch states
   const [shops, setShops] = useState<Shop[]>([]);
@@ -280,6 +284,21 @@ export default function App() {
       console.error('Error loading sync queue', e);
     }
     setSyncQueue(loadedQueue);
+
+    // H. Repairs/Maintenance list setup
+    let loadedRepairs: RepairOrder[] = [];
+    try {
+      const storedRepairs = localStorage.getItem('pos_repairs');
+      if (storedRepairs) {
+        const parsed = JSON.parse(storedRepairs);
+        if (Array.isArray(parsed)) {
+          loadedRepairs = parsed;
+        }
+      }
+    } catch (e) {
+      console.error('Error loading repairs from localStorage', e);
+    }
+    setRepairs(loadedRepairs);
   }, []);
 
   // 2. HELPER TO SAVE TO LOCALSTORAGE
@@ -336,6 +355,39 @@ export default function App() {
     saveState('pos_products', updatedProducts);
 
     queueSyncItem('products', 'delete', id, { id });
+  };
+
+  // 3B. HANDLERS: REPAIRS & MAINTENANCE
+  const handleAddRepair = (newRepairData: Omit<RepairOrder, 'id' | 'receivedDate' | 'updatedAt'>) => {
+    const generatedId = "repair_" + Math.random().toString(36).substr(2, 9);
+    const newRepair: RepairOrder = {
+      ...newRepairData,
+      id: generatedId,
+      receivedDate: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    const updatedRepairs = [newRepair, ...repairs];
+    setRepairs(updatedRepairs);
+    saveState('pos_repairs', updatedRepairs);
+
+    queueSyncItem('repairs', 'create', generatedId, newRepair);
+  };
+
+  const handleUpdateRepair = (updatedRep: RepairOrder) => {
+    const updatedRepairs = repairs.map(r => r.id === updatedRep.id ? updatedRep : r);
+    setRepairs(updatedRepairs);
+    saveState('pos_repairs', updatedRepairs);
+
+    queueSyncItem('repairs', 'update', updatedRep.id, updatedRep);
+  };
+
+  const handleDeleteRepair = (id: string) => {
+    const updatedRepairs = repairs.filter(r => r.id !== id);
+    setRepairs(updatedRepairs);
+    saveState('pos_repairs', updatedRepairs);
+
+    queueSyncItem('repairs', 'delete', id, { id });
   };
 
   // 4. HANDLERS: SHIFTS MANAGEMENT
@@ -491,6 +543,7 @@ export default function App() {
     localStorage.removeItem('pos_active_shift');
     localStorage.removeItem('pos_historical_shifts');
     localStorage.removeItem('pos_sync_queue');
+    localStorage.removeItem('pos_repairs');
 
     // Make sure migration flag is set so we don't clear again automatically
     localStorage.setItem('pos_fath_migration_v3', 'true');
@@ -517,6 +570,7 @@ export default function App() {
     setActiveShift(null);
     setHistoricalShifts([]);
     setSyncQueue([]);
+    setRepairs([]);
 
     // 4. Save defaults to localStorage for immediate persistence
     localStorage.setItem('pos_shops', JSON.stringify(freshShops));
@@ -526,6 +580,7 @@ export default function App() {
     localStorage.setItem('pos_active_shift', JSON.stringify(null));
     localStorage.setItem('pos_historical_shifts', JSON.stringify([]));
     localStorage.setItem('pos_sync_queue', JSON.stringify([]));
+    localStorage.setItem('pos_repairs', JSON.stringify([]));
   };
 
   const getArabicDayName = (dayIndex: number): string => {
@@ -568,6 +623,8 @@ export default function App() {
   const activeScopedOrders = orders.filter(o => o.shopId === activeShopId);
   const activeScopedShift = activeShift && activeShift.shopId === activeShopId ? activeShift : null;
   const activeScopedHistoricalShifts = historicalShifts.filter(s => s.shopId === activeShopId);
+  const activeScopedRepairs = repairs.filter(r => r.shopId === activeShopId);
+  const pendingRepairsCount = activeScopedRepairs.filter(r => r.status !== 'delivered').length;
 
   return (
     <div className="flex flex-col h-screen bg-[#F8F9FA] text-[#1A1A1A] font-sans overflow-hidden">
@@ -689,6 +746,23 @@ export default function App() {
             >
               <FolderLock size={16} />
               <span>{lang === 'en' ? 'Shift Ledger (الوردية)' : 'سجل ورديات الصندوق'}</span>
+            </button>
+
+            <button
+              onClick={() => { setActiveTab('repairs'); setIsSidebarOpen(false); }}
+              className={`w-full flex items-center justify-between px-3.5 py-3 rounded-xl font-medium transition ${
+                activeTab === 'repairs' ? 'bg-[#F3F4F6] text-black font-semibold border border-transparent' : 'text-[#6B7280] hover:text-[#1A1A1A] hover:bg-[#F9FAFB]'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <Wrench size={16} />
+                <span>{lang === 'en' ? 'Device Repairs / Maintenance' : 'إدارة صيانة الأجهزة والعملاء'}</span>
+              </div>
+              {pendingRepairsCount > 0 && (
+                <span className="bg-rose-500 text-white font-black text-[10px] w-5 h-5 flex items-center justify-center rounded-full animate-bounce shrink-0" title={lang === 'ar' ? 'أجهزة صيانة قيد الانتظار' : 'Pending Repairs'}>
+                  {pendingRepairsCount}
+                </span>
+              )}
             </button>
 
             {userRole === 'admin' && (
@@ -970,6 +1044,17 @@ export default function App() {
                   syncQueue={syncQueue}
                   onTriggerSync={handleTriggerSyncFlush}
                   lang={lang}
+                />
+              )}
+
+              {activeTab === 'repairs' && (
+                <Repairs
+                  repairs={repairs}
+                  onAddRepair={handleAddRepair}
+                  onUpdateRepair={handleUpdateRepair}
+                  onDeleteRepair={handleDeleteRepair}
+                  lang={lang}
+                  activeShopId={activeShopId}
                 />
               )}
             </motion.div>
