@@ -19,3 +19,38 @@ html, body {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* Global custom elegant scrollbar styling for a highly polished, effortless scroll experience on PC & Laptops */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(241, 245, 249, 0.6); /* Very clean neutral background */
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1; /* slate-350 / slate-300 */
+  border-radius: 9999px;
+  border: 1.5px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8; /* slate-400 */
+  border-radius: 9999px;
+}
+
+/* Global scroll behavior, smooth physics, and inertial swipe/touch scrolling */
+* {
+  scroll-behavior: smooth;
+  /* Momentum scroll support on iPad/iPhone/Android tablets & touchscreen laptops */
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Standard thin scrollbar for Firefox support */
+@-moz-document url-prefix() {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 rgba(241, 245, 249, 0.6);
+  }
+}
