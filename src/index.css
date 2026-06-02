@@ -7,9 +7,8 @@
 }
 
 html, body {
-  overscroll-behavior: none !important;
-  overscroll-behavior-y: contain !important;
-  touch-action: pan-x pan-y;
+  margin: 0;
+  padding: 0;
 }
 
 /* Hide default chrome scrollbars for compact visual aesthetics */

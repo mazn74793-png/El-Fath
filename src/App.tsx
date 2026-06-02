@@ -42,10 +42,8 @@ import SyncHub from './components/SyncHub';
 import AdminPortal from './components/AdminPortal';
 export default function App() {
 
-  const [userRole, setUserRole] = useState<'admin' | 'cashier'>(() => {
-    const saved = localStorage.getItem('pos_user_role');
-    return (saved === 'admin' || saved === 'cashier') ? saved : 'cashier';
-  });
+  // Always default strictly to cashier upon page entry/reload to prevent unauthorized entry
+  const [userRole, setUserRole] = useState<'admin' | 'cashier'>('cashier');
 
   // Progressive Web App (PWA) installation state managers
   const [showInstallBanner, setShowInstallBanner] = useState(() => {
@@ -53,11 +51,8 @@ export default function App() {
   });
   const [showInstallModal, setShowInstallModal] = useState(false);
   const [installTab, setInstallTab] = useState<'android' | 'ios' | 'pc'>('android');
-  const [activeTab, setActiveTab] = useState(() => {
-    const savedRole = localStorage.getItem('pos_user_role');
-    const defaultRole = (savedRole === 'admin' || savedRole === 'cashier') ? savedRole : 'cashier';
-    return defaultRole === 'cashier' ? 'pos' : 'dashboard';
-  });
+  // Always default strictly to the 'pos' cashier tab upon page entry/reload
+  const [activeTab, setActiveTab] = useState('pos');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [lang, setLang] = useState<'en' | 'ar'>(() => {
     const saved = localStorage.getItem('pos_language');
@@ -889,7 +884,12 @@ export default function App() {
         </header>
 
         {/* Core dynamic viewport based on tab selection */}
-        <main className="flex-1 overflow-y-auto px-6 py-5">
+        <main 
+          tabIndex={0} 
+          className={`flex-1 px-6 py-5 focus:outline-hidden ${
+            activeTab === 'pos' ? 'overflow-hidden' : 'overflow-y-auto'
+          }`}
+        >
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}

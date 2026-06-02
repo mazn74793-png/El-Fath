@@ -382,7 +382,11 @@ export default function POS({ products, activeShift, onCheckout, onNavigate, lan
         </div>
 
         {/* CATALOG SELECT CARDS GRID */}
-        <div id="pos-catalog-grid" className="bg-gray-50/50 rounded-xl border border-[#E5E7EB] p-2.5 overflow-y-auto flex-1 max-h-[420px] lg:max-h-full">
+        <div 
+          id="pos-catalog-grid" 
+          tabIndex={0} 
+          className="bg-gray-50/50 rounded-xl border border-[#E5E7EB] p-2.5 overflow-y-auto flex-1 max-h-[420px] lg:max-h-full focus:outline-hidden"
+        >
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             {gridProducts.map(item => {
               const isOut = item.quantity <= 0;
@@ -461,7 +465,10 @@ export default function POS({ products, activeShift, onCheckout, onNavigate, lan
         </div>
 
         {/* Shopping Cart Items List Drawer */}
-        <div className="flex-1 overflow-y-auto pr-1 my-3 scrollbar-hide space-y-2.5 min-h-0">
+        <div 
+          tabIndex={0} 
+          className="flex-1 overflow-y-auto pr-1 my-3 scrollbar-hide space-y-2.5 min-h-0 focus:outline-hidden"
+        >
           {cart.length === 0 ? (
             <div className="h-full flex flex-col justify-center items-center text-xs text-gray-400 py-10 font-sans text-center">
               <ShoppingCart className="w-8 h-8 text-gray-300 mb-2" />
