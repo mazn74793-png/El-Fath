@@ -108,6 +108,7 @@ function assembleApp() {
 function zipFinalBuild() {
   const buildDir = path.join(__dirname, 'win32-build');
   const publicDir = path.join(__dirname, 'public');
+  const distDir = path.join(__dirname, 'dist');
   const outputPath = path.join(publicDir, 'Al-Fath-POS-Win7-32bit.zip');
   
   console.log('Creating final ZIP for download...');
@@ -121,11 +122,36 @@ function zipFinalBuild() {
     fs.rmSync(outputPath, { force: true });
   }
   
-  const zip = new AdmZip();
-  zip.addLocalFolder(buildDir);
-  zip.writeZip(outputPath);
+  // Try native Linux zip first (super fast compression, < 2 seconds)
+  let nativeZipSuccess = false;
+  try {
+    console.log('Attempting native zip execution for maximum speed...');
+    // We navigate to inside buildDir and run 'zip -r' to avoid prefixing parent folders in zip
+    execSync(`cd "${buildDir}" && zip -r -q -o "${outputPath}" .`);
+    console.log('Native zip compression completed successfully!');
+    nativeZipSuccess = true;
+  } catch (err) {
+    console.log('Native zip is not available or failed, falling back to AdmZip...');
+  }
+
+  if (!nativeZipSuccess) {
+    const zip = new AdmZip();
+    zip.addLocalFolder(buildDir);
+    zip.writeZip(outputPath);
+    console.log('AdmZip compression completed.');
+  }
   
   console.log('Final ZIP successfully created at: ' + outputPath);
+
+  // If dist directory exists, write it there so it is immediately accessible under index in production bundle
+  if (fs.existsSync(distDir)) {
+    const distOutputPath = path.join(distDir, 'Al-Fath-POS-Win7-32bit.zip');
+    if (fs.existsSync(distOutputPath)) {
+      fs.rmSync(distOutputPath, { force: true });
+    }
+    fs.copyFileSync(outputPath, distOutputPath);
+    console.log('Successfully copied build artifact to production dist folder:', distOutputPath);
+  }
 }
 
 async function run() {

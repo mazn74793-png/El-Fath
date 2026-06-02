@@ -467,7 +467,7 @@ export default function POS({ products, activeShift, onCheckout, onNavigate, lan
         {/* Shopping Cart Items List Drawer */}
         <div 
           tabIndex={0} 
-          className="flex-1 overflow-y-auto pr-1 my-3 scrollbar-hide space-y-2.5 min-h-0 focus:outline-hidden"
+          className="flex-1 overflow-y-auto pr-1 my-3 space-y-2.5 min-h-0 focus:outline-hidden"
         >
           {cart.length === 0 ? (
             <div className="h-full flex flex-col justify-center items-center text-xs text-gray-400 py-10 font-sans text-center">

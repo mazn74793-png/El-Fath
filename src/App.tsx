@@ -886,9 +886,7 @@ export default function App() {
         {/* Core dynamic viewport based on tab selection */}
         <main 
           tabIndex={0} 
-          className={`flex-1 px-6 py-5 focus:outline-hidden ${
-            activeTab === 'pos' ? 'overflow-hidden' : 'overflow-y-auto'
-          }`}
+          className="flex-1 px-6 py-5 focus:outline-hidden overflow-y-auto"
         >
           <AnimatePresence mode="wait">
             <motion.div
