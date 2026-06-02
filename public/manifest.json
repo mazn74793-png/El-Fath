@@ -1,0 +1,23 @@
+{
+  "short_name": "Al-Fath POS",
+  "name": "الفتح لقطع غيار الأجهزة المنزلية - كاشير ومبيعات",
+  "description": "نظام الفتح POS المتطور لإدارة مبيعات ومخزون قطع غيار الأجهزة المنزلية.",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/logo.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#0f172a",
+  "theme_color": "#4f46e5",
+  "display": "standalone",
+  "orientation": "portrait-primary"
+}
