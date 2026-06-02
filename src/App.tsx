@@ -25,7 +25,9 @@ import {
   Laptop,
   ExternalLink,
   Smartphone,
-  Info
+  Info,
+  Maximize,
+  Minimize
 } from 'lucide-react';
 
 import { Product, SalesOrder, Shift, SyncItem, Shop } from './types';
@@ -42,7 +44,7 @@ export default function App() {
 
   const [userRole, setUserRole] = useState<'admin' | 'cashier'>(() => {
     const saved = localStorage.getItem('pos_user_role');
-    return (saved === 'admin' || saved === 'cashier') ? saved : 'admin';
+    return (saved === 'admin' || saved === 'cashier') ? saved : 'cashier';
   });
 
   // Progressive Web App (PWA) installation state managers
@@ -53,13 +55,40 @@ export default function App() {
   const [installTab, setInstallTab] = useState<'android' | 'ios' | 'pc'>('android');
   const [activeTab, setActiveTab] = useState(() => {
     const savedRole = localStorage.getItem('pos_user_role');
-    return savedRole === 'cashier' ? 'pos' : 'dashboard';
+    const defaultRole = (savedRole === 'admin' || savedRole === 'cashier') ? savedRole : 'cashier';
+    return defaultRole === 'cashier' ? 'pos' : 'dashboard';
   });
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [lang, setLang] = useState<'en' | 'ar'>(() => {
     const saved = localStorage.getItem('pos_language');
-    return (saved === 'ar' || saved === 'en') ? saved : 'en';
+    return (saved === 'ar' || saved === 'en') ? saved : 'ar'; // Change default to Arabic for local user context
   });
+
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().then(() => {
+        setIsFullscreen(true);
+      }).catch(err => {
+        console.error('Error enabling fullscreen:', err);
+      });
+    } else {
+      document.exitFullscreen().then(() => {
+        setIsFullscreen(false);
+      }).catch(err => {
+        console.error('Error disabling fullscreen:', err);
+      });
+    }
+  };
 
   // Secure PIN verification for switching back to Admin/Owner Mode
   const [pinInput, setPinInput] = useState('');
@@ -834,7 +863,17 @@ export default function App() {
           </div>
 
           {/* Quick status line */}
-          <div className="flex items-center gap-4 text-xs font-sans font-bold select-none">
+          <div className="flex items-center gap-3.5 text-xs font-sans font-bold select-none">
+            {/* Fullscreen Trigger Button */}
+            <button
+              onClick={toggleFullscreen}
+              className="flex items-center gap-1.5 bg-indigo-50 border border-indigo-100 hover:bg-indigo-100 text-indigo-950 transition active:scale-95 py-1.5 px-3 rounded-full text-[11px] font-bold cursor-pointer"
+              title={lang === 'ar' ? 'تشغيل ملء الشاشة' : 'Toggle Fullscreen'}
+            >
+              {isFullscreen ? <Minimize size={13} className="text-indigo-650" /> : <Maximize size={13} className="text-indigo-650" />}
+              <span>{lang === 'ar' ? (isFullscreen ? 'نافذة عادية' : 'شاشة كاملة 🖥️') : (isFullscreen ? 'Exit Fullscreen' : 'Fullscreen 🖥️')}</span>
+            </button>
+
             {isOnline ? (
               <div className="flex items-center gap-1.5 text-[#059669] bg-[#ECFDF5] border border-[#A7F3D0] px-3 py-1 rounded-full text-[10px] font-bold tracking-wider">
                 <Wifi size={12} className="shrink-0" />
@@ -1018,7 +1057,30 @@ export default function App() {
               </div>
 
               {/* Instructions Detail Body */}
-              <div className="p-5 space-y-4 flex-1 overflow-y-auto max-h-[290px] font-sans">
+              <div className="p-5 space-y-4 flex-1 overflow-y-auto max-h-[310px] font-sans">
+                {/* Embedded IFrame alert help */}
+                <div className="bg-amber-50 border border-amber-250 p-4 rounded-2xl text-xs space-y-2 text-right" dir="rtl">
+                  <p className="font-extrabold text-amber-950 flex items-center gap-1.5 justify-end">
+                    <span>⚠️</span>
+                    <span>توضيح هام بخصوص تنزيل وتثبيت التطبيق على جهازك:</span>
+                  </p>
+                  <p className="text-[11px] text-amber-900 leading-relaxed font-semibold">
+                    بسبب سياسات حماية متصفح Chrome، يتم حجب خيار التنزيل التلقائي لـ PWA عندما يكون الكاشير مفتوحاً داخل نافذة المعاينة والتحرير بنظام AI Studio.
+                  </p>
+                  <p className="text-[11px] text-amber-900 leading-relaxed">
+                    لكي يظهر لك خيار التثبيت والتحميل المباشر فورا: اضغط على الزر التالي ليفتح الكاشير مستقل تماماً بملء المتصفح، وسيظهر لك خيار التنزيل في شريط العنوان أعلى متصفحك أو بهاتفك في ثانية واحدة!
+                  </p>
+                  <a
+                    href={typeof window !== 'undefined' ? window.location.href : '#'}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="w-full inline-flex items-center justify-center gap-2 py-2 px-3 bg-amber-600 hover:bg-amber-750 text-white font-extrabold text-xs rounded-xl shadow-xs transition active:scale-98 text-center cursor-pointer mt-1"
+                  >
+                    <ExternalLink size={12} />
+                    <span>افتح الكاشير مستقل للتحميل والتثبيت الفوري 📲</span>
+                  </a>
+                </div>
+
                 {installTab === 'android' && (
                   <div className="space-y-3.5 animate-fade-in text-right">
                     <div className="flex items-center gap-2 bg-emerald-50 text-emerald-950 p-3 rounded-xl border border-emerald-100 text-xs text-right">
@@ -1110,12 +1172,66 @@ export default function App() {
                       </p>
                     </div>
 
+                    {/* Direct Standalone Download for Win7 32-bit */}
+                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl space-y-2 mt-2">
+                      <p className="text-xs font-bold text-slate-900">
+                        {lang === 'ar' 
+                          ? '💻 تحميل برنامج الفتح كامل برابط مباشر (لويندوز 7 وما فوق - نواة 32/64 بت):' 
+                          : '💻 Pre-packaged Desktop Application (for Win 7 and above - 32/64 bit):'}
+                      </p>
+                      <p className="text-[10px] text-gray-500">
+                        {lang === 'ar'
+                          ? 'لقد قمنا بتجميع ملفات برنامج الكاشير مسبقاً داخل مشغل Electron مخصص يعمل بدون الحاجة لتثبيت أي ملحقات إضافية.'
+                          : 'Standalone build precompiled with Electron offline shell.'}
+                      </p>
+                      <a 
+                        href="/Al-Fath-POS-Win7-32bit.zip" 
+                        download="Al-Fath-POS-Win7-32bit.zip"
+                        className="w-full inline-flex items-center justify-center gap-2 py-2 px-4 bg-indigo-650 hover:bg-indigo-700 text-white font-extrabold text-xs rounded-xl shadow-xs transition active:scale-98 text-center cursor-pointer"
+                      >
+                        <Download size={13} />
+                        <span>{lang === 'ar' ? 'تحميل تطبيق الفتح لويندوز 7 بملف واحد فوري (ZIP)' : 'Download Windows 7 POS Portable App (ZIP)'}</span>
+                      </a>
+                    </div>
+
+                    {/* Node.js setup for Win7 */}
+                    <div className="bg-emerald-50/50 border border-emerald-100 p-3.5 rounded-2xl space-y-2 text-xs">
+                      <p className="font-bold text-emerald-950">
+                        {lang === 'ar'
+                          ? '⚙️ تثبيت بيئة تشغيل Node.js للويندوز 7 (فقط للمطورين):'
+                          : '⚙️ Node.js Environment for Windows 7 (Developers only):'}
+                      </p>
+                      <p className="text-[10px] text-gray-650">
+                        {lang === 'ar'
+                          ? 'إذا كنت تريد تشغيل الكاشير وتطوير المكونات محلياً، فآخر إصدار يدعم ويندوز 7 هو Node.js v16.20.2. حمل النسخة المتوافقة مع جهازك مباشرة عبر هذه الروابط الرسمية الآمنة لشركة Node.js:'
+                          : 'The last Node.js version officially supporting Win 7 is v16.20.2. Install via these direct links:'}
+                      </p>
+                      <div className="grid grid-cols-2 gap-2 text-center">
+                        <a 
+                          href="https://nodejs.org/dist/v16.20.2/node-v16.20.2-x86.msi" 
+                          target="_blank" 
+                          rel="noreferrer"
+                          className="bg-white border border-emerald-200 text-emerald-800 hover:bg-emerald-50 hover:text-emerald-900 text-[10.5px] font-bold py-1.5 px-2 rounded-lg block cursor-pointer transition"
+                        >
+                          {lang === 'ar' ? 'تنزيل نواة 32 بت (X86 MSI)' : 'Download 32-bit (X86)'}
+                        </a>
+                        <a 
+                          href="https://nodejs.org/dist/v16.20.2/node-v16.20.2-x64.msi" 
+                          target="_blank" 
+                          rel="noreferrer"
+                          className="bg-white border border-emerald-250 text-emerald-800 hover:bg-emerald-50 hover:text-emerald-950 text-[10.5px] font-bold py-1.5 px-2 rounded-lg block cursor-pointer transition"
+                        >
+                          {lang === 'ar' ? 'تنزيل نواة 64 بت (X64 MSI)' : 'Download 64-bit (X64)'}
+                        </a>
+                      </div>
+                    </div>
+
                     <ol className="space-y-3 text-xs text-gray-700 leading-relaxed text-right">
                       <li className="flex gap-2.5 items-start">
                         <span className="bg-orange-650 text-white rounded-full w-4.5 h-4.5 flex items-center justify-center font-bold text-[10px] shrink-0 mt-0.5">١</span>
                         <p className="flex-1">
                           {lang === 'ar' 
-                            ? 'التفت إلى نهاية شريط العنوان (URL Bar) في أعلى متصفحك بجوار النجمة ومفضلة الصفحة.' 
+                            ? 'أو يمكنك تثبيت نسخة ويب مستقلة PWA عبر متصفحك: التفت إلى نهاية شريط العنوان (URL Bar) في أعلى متصفحك بجوار النجمة ومفضلة الصفحة.' 
                             : 'Look at the browser URL bar on the right side next to bookmarks.'}
                         </p>
                       </li>

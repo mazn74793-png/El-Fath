@@ -6,6 +6,12 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
+html, body {
+  overscroll-behavior: none !important;
+  overscroll-behavior-y: contain !important;
+  touch-action: pan-x pan-y;
+}
+
 /* Hide default chrome scrollbars for compact visual aesthetics */
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
