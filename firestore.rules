@@ -27,6 +27,11 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // SYSTEM DEVICES TRACKER
+    match /devices/{deviceId} {
+      allow read, write: if true;
+    }
+
     // MULTI-SHOP BRANCH SETTINGS
     match /shops/{shopId} {
       allow read, write: if true;

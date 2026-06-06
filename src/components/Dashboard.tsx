@@ -64,12 +64,15 @@ export default function Dashboard({ products, orders, activeShift, onNavigate, l
     let totalCost = 0;
     let cardSalesTotal = 0;
     let cashSalesTotal = 0;
+    let vodafoneSalesTotal = 0;
     const productSalesCount: Record<string, number> = {};
 
     orders.forEach(order => {
       totalRevenue += order.total;
       if (order.paymentMethod === 'card') {
         cardSalesTotal += order.total;
+      } else if (order.paymentMethod === 'vodafone') {
+        vodafoneSalesTotal += order.total;
       } else {
         cashSalesTotal += order.total;
       }
@@ -120,6 +123,7 @@ export default function Dashboard({ products, orders, activeShift, onNavigate, l
       profitMarginPercent,
       cashSalesTotal,
       cardSalesTotal,
+      vodafoneSalesTotal,
       lowStockCount: lowStockItems.length,
       expirationCount: expirationAlerts.length,
       lowStockItems,

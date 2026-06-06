@@ -41,6 +41,7 @@ export interface OrderLineItem {
   quantity: number;
   discount: number;
   total: number;
+  returnedQty?: number; // quantity returned
 }
 
 export interface SalesOrder {
@@ -53,9 +54,11 @@ export interface SalesOrder {
   discount: number; // overall order discount
   tax: number;
   total: number;
-  paymentMethod: 'cash' | 'card';
+  paymentMethod: 'cash' | 'card' | 'vodafone';
   createdAt: string;
   shopId?: string; // Multi-shop scope association
+  status?: 'completed' | 'returned' | 'partially_returned'; // return status
+  returnedAmount?: number; // total amount refunded so far
 }
 
 export interface Shift {
@@ -67,6 +70,7 @@ export interface Shift {
   openingCash: number;
   cashSales: number;
   cardSales: number;
+  vodafoneSales?: number;
   expectedCash: number;
   actualCash?: number;
   discrepancy?: number;

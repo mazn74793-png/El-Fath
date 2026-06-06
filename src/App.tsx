@@ -365,6 +365,7 @@ export default function App() {
       openingCash,
       cashSales: 0,
       cardSales: 0,
+      vodafoneSales: 0,
       expectedCash: openingCash,
       status: 'open',
       shopId: activeShopId
@@ -386,6 +387,9 @@ export default function App() {
     const cardSalesTotal = activeShiftOrders
       .filter(o => o.paymentMethod === 'card')
       .reduce((acc, o) => acc + o.total, 0);
+    const vodafoneSalesTotal = activeShiftOrders
+      .filter(o => o.paymentMethod === 'vodafone')
+      .reduce((acc, o) => acc + o.total, 0);
 
     const expectedCash = activeShift.openingCash + cashSalesTotal;
     const discrepancy = actualCash - expectedCash;
@@ -395,6 +399,7 @@ export default function App() {
       closedAt: new Date().toISOString(),
       cashSales: cashSalesTotal,
       cardSales: cardSalesTotal,
+      vodafoneSales: vodafoneSalesTotal,
       expectedCash,
       actualCash,
       discrepancy,

@@ -50,7 +50,7 @@ export default function POS({ products, activeShift, onCheckout, onNavigate, lan
 
   // Checkout modifiers
   const [overallDiscount, setOverallDiscount] = useState<number>(0);
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card'>('cash');
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'vodafone'>('cash');
   
   // Checkout Modal State
   const [isCheckingOut, setIsCheckingOut] = useState(false);
@@ -591,18 +591,27 @@ export default function POS({ products, activeShift, onCheckout, onNavigate, lan
               <span className="text-[9px] text-gray-400 font-mono">
                 {lang === 'en' ? 'Select register mode' : 'تحديد طريقة الدفع'}
               </span>
-              <div className="flex bg-[#222222] rounded-lg p-0.5 border border-[#333333]">
+              <div className="flex bg-[#222222] rounded-lg p-0.5 border border-[#333333] gap-0.5">
                 <button
+                  type="button"
                   onClick={() => setPaymentMethod('cash')}
                   className={`px-2 py-1 text-[10px] font-bold rounded-md transition ${paymentMethod === 'cash' ? 'bg-white text-black' : 'text-gray-400 hover:text-white'}`}
                 >
-                  {lang === 'en' ? 'Cash' : 'نقدي'} (نقدي)
+                  {lang === 'en' ? 'Cash' : 'نقدي الكاش'}
                 </button>
                 <button
+                  type="button"
+                  onClick={() => setPaymentMethod('vodafone')}
+                  className={`px-2 py-1 text-[10px] font-bold rounded-md transition ${paymentMethod === 'vodafone' ? 'bg-[#DC2626] text-white' : 'text-gray-400 hover:text-white'}`}
+                >
+                  {lang === 'en' ? 'Vodafone Cash' : 'فودافون كاش'}
+                </button>
+                <button
+                  type="button"
                   onClick={() => setPaymentMethod('card')}
                   className={`px-2 py-1 text-[10px] font-bold rounded-md transition ${paymentMethod === 'card' ? 'bg-white text-black' : 'text-gray-400 hover:text-white'}`}
                 >
-                  {lang === 'en' ? 'Card' : 'شبكة'} (فيزا)
+                  {lang === 'en' ? 'Card / Visa' : 'شبكة فيزا'}
                 </button>
               </div>
             </div>
@@ -653,7 +662,11 @@ export default function POS({ products, activeShift, onCheckout, onNavigate, lan
               <div className="p-5 space-y-4">
                 <div className="text-xs text-gray-500 font-medium">
                   {lang === 'en' ? 'Payment Method selected:' : 'طريقة الدفع المحددة:'} <span className="font-bold text-black uppercase">
-                    {paymentMethod === 'cash' ? (lang === 'en' ? 'Cash' : 'نقدي') : (lang === 'en' ? 'Card' : 'شبكة/فيزا')}
+                    {paymentMethod === 'cash' 
+                      ? (lang === 'en' ? 'Cash' : 'كاش نقدي') 
+                      : paymentMethod === 'vodafone'
+                        ? (lang === 'en' ? 'Vodafone Cash' : 'فودافون كاش')
+                        : (lang === 'en' ? 'Visa / Card' : 'فيزا / شبكة')}
                   </span>
                 </div>
 
@@ -793,7 +806,7 @@ export default function POS({ products, activeShift, onCheckout, onNavigate, lan
                 </div>
 
                 <div className="text-[9px] text-gray-400 text-center font-bold tracking-wider pt-2">
-                  {lang === 'en' ? 'PAYMENT RECOGNIZED:' : 'طريقة الدفع المعترف بها:'} {lastPrintedInvoice.paymentMethod === 'cash' ? (lang === 'en' ? 'CASH' : 'نقداً') : (lang === 'en' ? 'CARD' : 'بطاقة')}
+                  {lang === 'en' ? 'PAYMENT RECOGNIZED:' : 'طريقة الدفع المعترف بها:'} {lastPrintedInvoice.paymentMethod === 'cash' ? (lang === 'en' ? 'CASH' : 'نقداً') : lastPrintedInvoice.paymentMethod === 'vodafone' ? (lang === 'en' ? 'VODAFONE CASH' : 'فودافون كاش') : (lang === 'en' ? 'CARD' : 'بطاقة')}
                 </div>
 
                 <div className="text-center text-[9px] text-gray-400 font-bold border-t border-gray-200 pt-2 flex items-center justify-center gap-1.5 font-sans">

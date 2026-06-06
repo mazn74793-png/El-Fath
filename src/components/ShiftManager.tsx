@@ -46,15 +46,18 @@ export default function ShiftManager({ activeShift, onOpenShift, onCloseShift, h
 
   // 1. COMPUTE ACTIVE SHIFT TRANSACTION COUNTS LIVE FROM ORDERS
   const activeShiftStats = useMemo(() => {
-    if (!activeShift) return { count: 0, cashSales: 0, cardSales: 0 };
+    if (!activeShift) return { count: 0, cashSales: 0, cardSales: 0, vodafoneSales: 0 };
 
     const shiftOrders = orders.filter(o => o.shiftId === activeShift.id);
     let cashSales = 0;
     let cardSales = 0;
+    let vodafoneSales = 0;
 
     shiftOrders.forEach(o => {
       if (o.paymentMethod === 'card') {
         cardSales += o.total;
+      } else if (o.paymentMethod === 'vodafone') {
+        vodafoneSales += o.total;
       } else {
         cashSales += o.total;
       }
@@ -63,7 +66,8 @@ export default function ShiftManager({ activeShift, onOpenShift, onCloseShift, h
     return {
       count: shiftOrders.length,
       cashSales,
-      cardSales
+      cardSales,
+      vodafoneSales
     };
   }, [activeShift, orders]);
 
@@ -176,26 +180,30 @@ export default function ShiftManager({ activeShift, onOpenShift, onCloseShift, h
               {/* SALES ACCRUAL PANEL */}
               <div className="border border-[#E5E7EB] bg-gray-50/50 rounded-xl p-5 space-y-4 font-sans">
                 <h4 className="text-xs font-bold text-[#1A1A1A] uppercase tracking-widest font-sans">{lang === 'en' ? 'Real-time Sales Accrual Breakdown' : 'المبيعات اللحظية المتراكمة بالدرج'}</h4>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-5 text-xs font-mono">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs font-mono">
                   <div className="space-y-1 bg-white p-3.5 rounded-lg border border-[#E5E7EB]">
                     <span className="text-gray-400 uppercase text-[9px] font-bold font-sans">{lang === 'en' ? 'Cash Sales (Drawer In)' : 'المبيعات النقدية (الدرج)'}</span>
-                    <h3 className="text-md font-extrabold text-slate-900 mt-0.5">${activeShiftStats.cashSales.toFixed(2)}</h3>
+                    <h3 className="text-md font-extrabold text-[#059669] mt-0.5">{activeShiftStats.cashSales.toFixed(2)} EGP</h3>
                   </div>
                   <div className="space-y-1 bg-white p-3.5 rounded-lg border border-[#E5E7EB]">
                     <span className="text-gray-400 uppercase text-[9px] font-bold font-sans">{lang === 'en' ? 'Visa / Card Sales (Bank In)' : 'مبيعات الشبكة (البنك)'}</span>
-                    <h3 className="text-md font-extrabold text-slate-700 mt-0.5">${activeShiftStats.cardSales.toFixed(2)}</h3>
+                    <h3 className="text-md font-extrabold text-[#2563EB] mt-0.5">{activeShiftStats.cardSales.toFixed(2)} EGP</h3>
+                  </div>
+                  <div className="space-y-1 bg-white p-3.5 rounded-lg border border-[#E5E7EB]">
+                    <span className="text-gray-400 uppercase text-[9px] font-bold font-sans">{lang === 'en' ? 'Vodafone Cash (Digital Wallet)' : 'فودافون كاش (محفظة)'}</span>
+                    <h3 className="text-md font-extrabold text-[#DC2626] mt-0.5">{activeShiftStats.vodafoneSales.toFixed(2)} EGP</h3>
                   </div>
                   <div className="space-y-1 bg-black text-white p-3.5 rounded-lg border border-transparent">
-                    <span className="text-gray-300 uppercase text-[9px] font-bold font-sans">{lang === 'en' ? 'EXPECTED DRAWER CASH' : 'النقد المتوقع في الخزنة'}</span>
-                    <h3 className="text-md font-extrabold text-white mt-0.5">${expectedCashTally.toFixed(2)}</h3>
+                    <span className="text-gray-300 uppercase text-[9px] font-bold font-sans">{lang === 'en' ? 'EXPECTED DRAWER CASH' : 'النقد المتوقع في الدرج والمسؤلية'}</span>
+                    <h3 className="text-md font-extrabold text-white mt-0.5">{expectedCashTally.toFixed(2)} EGP</h3>
                   </div>
                 </div>
                 <div className="text-[10px] text-gray-400 font-semibold flex items-center gap-1">
                   <Terminal size={12} className="text-black text-xs shrink-0" />
                   <span>
                     {lang === 'en' 
-                      ? 'Only cash sales increment physical expected drawer totals. Credits are mapped as digital bank clearance limits.' 
-                      : 'المبيعات النقدية فقط هي التي تزيد من توتال الدرج الفعلي الملموس، بينما مبيعات الشبكة ترسل مباشرة للحساب البنكي.'}
+                      ? 'Only cash sales increment physical expected drawer totals. Credits like Card and Vodafone Cash are securely registered as independent digital transactions.' 
+                      : 'المبيعات النقدية فقط هي التي تزيد من توتال النقد الفعلي الملموس بالخزنة، بينما مبيعات فودافون كاش والفيزا يتم تحصيلها وتوثيقها بشكل رقمي خارج عهدة الدرج الملموسة.'}
                   </span>
                 </div>
               </div>
@@ -330,10 +338,10 @@ export default function ShiftManager({ activeShift, onOpenShift, onCloseShift, h
                     </div>
 
                     <div className="grid grid-cols-2 gap-2 text-[10px] font-mono text-gray-500 border-t border-gray-100/50 pt-2">
-                      <div>{lang === 'en' ? 'Float Opening:' : 'رأس مال الافتتاح:'} <span className="font-bold text-gray-700">${shift.openingCash.toFixed(2)}</span></div>
-                      <div>{lang === 'en' ? 'Expected Closing:' : 'توتال الدرج المتوقع:'} <span className="font-bold text-gray-700">${shift.expectedCash.toFixed(2)}</span></div>
-                      <div>{lang === 'en' ? 'Actual Count:' : 'النقد المدخل يدوياً:'} <span className="font-bold text-gray-700">${shift.actualCash?.toFixed(2) || 'N/A'}</span></div>
-                      <div className="text-black font-bold">{lang === 'en' ? 'Sales Qty:' : 'مبيعات الكاش بالوردية:'} ${shift.cashSales.toFixed(2)}</div>
+                      <div>{lang === 'en' ? 'Float Opening:' : 'رأس مال الافتتاح:'} <span className="font-bold text-gray-700">{shift.openingCash.toFixed(2)} {lang === 'en' ? 'EGP' : 'ج.م'}</span></div>
+                      <div>{lang === 'en' ? 'Expected Closing:' : 'توتال الدرج المتوقع:'} <span className="font-bold text-gray-700">{shift.expectedCash.toFixed(2)} {lang === 'en' ? 'EGP' : 'ج.م'}</span></div>
+                      <div>{lang === 'en' ? 'Actual Count:' : 'النقد المدخل يدوياً:'} <span className="font-bold text-gray-700">{shift.actualCash?.toFixed(2) || 'N/A'} {lang === 'en' ? 'EGP' : 'ج.م'}</span></div>
+                      <div className="text-black font-bold">{lang === 'en' ? 'Cash/VF Sales:' : 'مبيعات كاش/فودافون:'} <span className="text-emerald-700">{shift.cashSales.toFixed(2)}</span> / <span className="text-red-650">{shift.vodafoneSales?.toFixed(2) || '0.00'}</span> {lang === 'en' ? 'EGP' : 'ج.م'}</div>
                     </div>
                   </div>
                 );

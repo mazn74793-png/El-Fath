@@ -110,6 +110,21 @@
         "createdAt": { "type": "string", "format": "date-time", "description": "Timestamp created" }
       },
       "required": ["id", "name", "type", "currency", "createdAt"]
+    },
+    "Device": {
+      "title": "Device",
+      "description": "System hardware session/device status log",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique device hardware ID" },
+        "deviceName": { "type": "string", "description": "Parsed human-friendly device name" },
+        "userAgent": { "type": "string", "description": "Raw browser client userAgent" },
+        "lastActive": { "type": "string", "format": "date-time", "description": "Last active timestamp" },
+        "status": { "type": "string", "enum": ["online", "offline"], "description": "Network connectivity status" },
+        "shopId": { "type": "string", "description": "Currently active shop branch ID" },
+        "userRole": { "type": "string", "description": "Active operator privilege level" }
+      },
+      "required": ["id", "deviceName", "userAgent", "lastActive", "status"]
     }
   },
   "firestore": {
@@ -136,6 +151,10 @@
     "shops/{shopId}": {
       "schema": "Shop",
       "description": "Configurations for multiple branch instances."
+    },
+    "devices/{deviceId}": {
+      "schema": "Device",
+      "description": "Logs and tracks devices running the POS system."
     }
   }
 }

@@ -28,9 +28,15 @@ import {
   User,
   ChevronDown,
   ChevronUp,
-  Edit
+  Edit,
+  RotateCcw,
+  Undo2,
+  RefreshCw
 } from 'lucide-react';
 import { Shop, Product, SalesOrder, Shift } from '../types';
+import { db, handleFirestoreError, OperationType } from '../firebase';
+import { doc, deleteDoc, setDoc } from 'firebase/firestore';
+import { AlertTriangle, Database } from 'lucide-react';
 
 interface AdminPortalProps {
   shops: Shop[];
@@ -76,7 +82,7 @@ export default function AdminPortal({
   });
   const [searchQuery, setSearchQuery] = useState('');
   const [filterCashier, setFilterCashier] = useState('all');
-  const [filterPayment, setFilterPayment] = useState<'all' | 'cash' | 'card'>('all');
+  const [filterPayment, setFilterPayment] = useState<'all' | 'cash' | 'card' | 'vodafone'>('all');
   const [filterShop, setFilterShop] = useState('all');
 
   // Add Shop states
@@ -85,6 +91,268 @@ export default function AdminPortal({
   const [newShopCurrency, setNewShopCurrency] = useState<Shop['currency']>('EGP');
   const [errorMe, setErrorMe] = useState('');
   const [successMe, setSuccessMe] = useState('');
+
+  // Return & Refund States
+  const [returnModalOpen, setReturnModalOpen] = useState(false);
+  const [activeReturnOrder, setActiveReturnOrder] = useState<SalesOrder | null>(null);
+  const [activeReturnItem, setActiveReturnItem] = useState<any | null>(null);
+  const [returnQty, setReturnQty] = useState<number>(1);
+  const [isRefunding, setIsRefunding] = useState(false);
+  const [returnError, setReturnError] = useState('');
+  const [returnSuccess, setReturnSuccess] = useState('');
+
+  // Cleanup/Clear Money states and preview
+  const [showCleanupPanel, setShowCleanupPanel] = useState(false);
+  const [deleteScopeType, setDeleteScopeType] = useState<'day' | 'all'>('day');
+  const [targetDateDelete, setTargetDateDelete] = useState<string>(() => {
+    const today = new Date();
+    const offset = today.getTimezoneOffset();
+    const localToday = new Date(today.getTime() - (offset * 60 * 1050));
+    return localToday.toISOString().split('T')[0];
+  });
+  const [targetShopDelete, setTargetShopDelete] = useState<string>('all');
+  const [deleteConfirmationText, setDeleteConfirmationText] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+  const [deleteSuccess, setDeleteSuccess] = useState('');
+
+  // Calculate preview of transactions/sales to be deleted based on selected scope
+  const deleteScopePreview = useMemo(() => {
+    const matchedOrders = orders.filter(o => {
+      // Date match
+      if (deleteScopeType === 'day' && targetDateDelete) {
+        const oDate = o.createdAt.split('T')[0];
+        if (oDate !== targetDateDelete) return false;
+      }
+      // Shop match
+      if (targetShopDelete !== 'all') {
+        const oShopId = o.shopId || 'shop_default';
+        if (oShopId !== targetShopDelete) return false;
+      }
+      return true;
+    });
+
+    const matchedShifts = shifts.filter(s => {
+      // Date match (openedAt split)
+      if (deleteScopeType === 'day' && targetDateDelete) {
+        const sDate = s.openedAt.split('T')[0];
+        if (sDate !== targetDateDelete) return false;
+      }
+      // Shop match
+      if (targetShopDelete !== 'all') {
+        const sShopId = s.shopId || 'shop_default';
+        if (sShopId !== targetShopDelete) return false;
+      }
+      return true;
+    });
+
+    const totalSum = matchedOrders.reduce((sum, o) => sum + o.total, 0);
+
+    return {
+      ordersCount: matchedOrders.length,
+      shiftsCount: matchedShifts.length,
+      totalSum
+    };
+  }, [orders, shifts, deleteScopeType, targetDateDelete, targetShopDelete]);
+
+  // Method to purge transaction data from Firestore
+  const handleClearMoney = async () => {
+    const verificationWord = lang === 'ar' ? 'تاكيد' : 'CONFIRM';
+    if (deleteConfirmationText.trim() !== verificationWord) {
+      setDeleteError(lang === 'en' ? 'Verification word does not match.' : 'برجاء كتابة كلمة التأكيد بشكل صحيح.');
+      return;
+    }
+
+    setIsDeleting(true);
+    setDeleteError('');
+    setDeleteSuccess('');
+
+    try {
+      // 1. Identify which orders to delete
+      const matchedOrders = orders.filter(o => {
+        if (deleteScopeType === 'day' && targetDateDelete) {
+          const oDate = o.createdAt.split('T')[0];
+          if (oDate !== targetDateDelete) return false;
+        }
+        if (targetShopDelete !== 'all') {
+          const oShopId = o.shopId || 'shop_default';
+          if (oShopId !== targetShopDelete) return false;
+        }
+        return true;
+      });
+
+      // 2. Identify which shifts to delete
+      const matchedShifts = shifts.filter(s => {
+        if (deleteScopeType === 'day' && targetDateDelete) {
+          const sDate = s.openedAt.split('T')[0];
+          if (sDate !== targetDateDelete) return false;
+        }
+        if (targetShopDelete !== 'all') {
+          const sShopId = s.shopId || 'shop_default';
+          if (sShopId !== targetShopDelete) return false;
+        }
+        return true;
+      });
+
+      let ordersDeleted = 0;
+      for (const order of matchedOrders) {
+        try {
+          await deleteDoc(doc(db, 'sales_orders', order.id));
+          ordersDeleted++;
+        } catch (error) {
+          handleFirestoreError(error, OperationType.DELETE, `sales_orders/${order.id}`);
+        }
+      }
+
+      let shiftsDeleted = 0;
+      for (const sh of matchedShifts) {
+        try {
+          await deleteDoc(doc(db, 'shifts', sh.id));
+          shiftsDeleted++;
+        } catch (error) {
+          handleFirestoreError(error, OperationType.DELETE, `shifts/${sh.id}`);
+        }
+      }
+
+      const successMsg = lang === 'en'
+        ? `Successfully cleared ${ordersDeleted} transactions totaling ${deleteScopePreview.totalSum.toFixed(2)} EGP and ${shiftsDeleted} shift logs.`
+        : `تم بنجاح حذف وتصفير المبيعات! تم مسح ${ordersDeleted} فاتورة بقيمة إجمالية ${deleteScopePreview.totalSum.toFixed(2)} ج.م، وحذف ${shiftsDeleted} وردية لتهيئة الخزنة.`;
+
+      setDeleteSuccess(successMsg);
+      setDeleteConfirmationText('');
+    } catch (err) {
+      console.error(err);
+      setDeleteError(lang === 'en' ? 'An error occurred during database cleanup.' : 'حدث خطأ غير متوقع أثناء مسح السجلات.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  // Handle Return action
+  const handleProcessReturn = async () => {
+    if (!activeReturnOrder) return;
+    setIsRefunding(true);
+    setReturnError('');
+    setReturnSuccess('');
+
+    try {
+      if (activeReturnItem) {
+        // Individual item partial/full return
+        const alreadyReturned = activeReturnItem.returnedQty || 0;
+        const maxAvailable = activeReturnItem.quantity - alreadyReturned;
+        if (returnQty < 1 || returnQty > maxAvailable) {
+          setReturnError(lang === 'en' ? 'Invalid return quantity.' : 'كمية المرتجع غير صالحة.');
+          setIsRefunding(false);
+          return;
+        }
+
+        // Calculate refund value per unit matching the actual checkout formula
+        const unitRefundAmount = activeReturnItem.total / activeReturnItem.quantity;
+        const totalRefundValue = unitRefundAmount * returnQty;
+
+        // Upgrade item details and determine order status
+        const updatedItems = activeReturnOrder.items.map(item => {
+          if (item.productId === activeReturnItem.productId) {
+            return {
+              ...item,
+              returnedQty: (item.returnedQty || 0) + returnQty
+            };
+          }
+          return item;
+        });
+
+        // Did everything in the invoice get returned?
+        const isAllReturned = updatedItems.every(item => (item.returnedQty || 0) >= item.quantity);
+        const orderStatus = isAllReturned ? 'returned' : 'partially_returned';
+        const newReturnedAmount = (activeReturnOrder.returnedAmount || 0) + totalRefundValue;
+
+        // Write order change to Firestore
+        const updatedOrder: SalesOrder = {
+          ...activeReturnOrder,
+          items: updatedItems,
+          status: orderStatus,
+          returnedAmount: Number(newReturnedAmount.toFixed(2))
+        };
+
+        // Standard Firestore setDoc
+        await setDoc(doc(db, 'sales_orders', activeReturnOrder.id), updatedOrder);
+
+        // Put quantity back into the branch product stock
+        const prod = products.find(p => p.id === activeReturnItem.productId);
+        if (prod) {
+          await setDoc(doc(db, 'products', prod.id), {
+            ...prod,
+            quantity: prod.quantity + returnQty,
+            updatedAt: new Date().toISOString()
+          });
+        }
+
+        setReturnSuccess(lang === 'en' 
+          ? `Successfully refunded ${returnQty}x of "${activeReturnItem.name}" totaling ${totalRefundValue.toFixed(2)} EGP.`
+          : `تم بنجاح إرجاع عدد ${returnQty} من "${activeReturnItem.name}" وإعادة إجمالي ${totalRefundValue.toFixed(2)} ج.م للمشتري.`
+        );
+      } else {
+        // Full Invoice refund
+        let totalRefundValue = 0;
+        
+        // Return remaining goods to active inventory
+        for (const item of activeReturnOrder.items) {
+          const alreadyReturned = item.returnedQty || 0;
+          const remainingToReturn = item.quantity - alreadyReturned;
+
+          if (remainingToReturn > 0) {
+            const unitRefundAmount = item.total / item.quantity;
+            totalRefundValue += unitRefundAmount * remainingToReturn;
+
+            const prod = products.find(p => p.id === item.productId);
+            if (prod) {
+              await setDoc(doc(db, 'products', prod.id), {
+                ...prod,
+                quantity: prod.quantity + remainingToReturn,
+                updatedAt: new Date().toISOString()
+              });
+            }
+          }
+        }
+
+        // Tag every item inside the invoice as fully returned
+        const updatedItems = activeReturnOrder.items.map(item => ({
+          ...item,
+          returnedQty: item.quantity
+        }));
+
+        const updatedOrder: SalesOrder = {
+          ...activeReturnOrder,
+          items: updatedItems,
+          status: 'returned',
+          returnedAmount: activeReturnOrder.total
+        };
+
+        await setDoc(doc(db, 'sales_orders', activeReturnOrder.id), updatedOrder);
+
+        setReturnSuccess(lang === 'en'
+          ? `Successfully refunded full invoice "${activeReturnOrder.id}" with total refund of ${activeReturnOrder.total.toFixed(2)} EGP.`
+          : `تم بنجاح إرجاع الفاتورة رقم "${activeReturnOrder.id}" بالكامل وإعادة ${activeReturnOrder.total.toFixed(2)} ج.م وموازنة المخزون.`
+        );
+      }
+
+      // Automatically reset modal states or close on success delay
+      setTimeout(() => {
+        setReturnModalOpen(false);
+        setActiveReturnOrder(null);
+        setActiveReturnItem(null);
+        setReturnQty(1);
+        setReturnSuccess('');
+        setReturnError('');
+      }, 2000);
+
+    } catch (err) {
+      console.error(err);
+      setReturnError(lang === 'en' ? 'Failed to process return in database.' : 'فشل تسجيل الارتجاع في قاعدة البيانات.');
+    } finally {
+      setIsRefunding(false);
+    }
+  };
 
   // Get active shop detail
   const activeShop = useMemo(() => {
@@ -101,9 +369,11 @@ export default function AdminPortal({
     let grandOrdersCount = orders.length;
 
     orders.forEach(order => {
-      grandRevenue += order.total;
+      const netTotal = order.total - (order.returnedAmount || 0);
+      grandRevenue += netTotal;
       order.items.forEach(item => {
-        grandCost += (item.costPrice * item.quantity);
+        const activeQty = item.quantity - (item.returnedQty || 0);
+        grandCost += (item.costPrice * activeQty);
       });
     });
 
@@ -118,9 +388,11 @@ export default function AdminPortal({
       let revenue = 0;
       let cost = 0;
       shopOrders.forEach(o => {
-        revenue += o.total;
+        const netO = o.total - (o.returnedAmount || 0);
+        revenue += netO;
         o.items.forEach(item => {
-          cost += (item.costPrice * item.quantity);
+          const activeQty = item.quantity - (item.returnedQty || 0);
+          cost += (item.costPrice * activeQty);
         });
       });
 
@@ -200,19 +472,23 @@ export default function AdminPortal({
     let totalSales = 0;
     let cashSales = 0;
     let cardSales = 0;
+    let vodafoneSales = 0;
     let totalTax = 0;
     let totalDiscount = 0;
     let totalCost = 0;
 
     filteredOrders.forEach(o => {
-      totalSales += o.total;
+      const netTotal = o.total - (o.returnedAmount || 0);
+      totalSales += netTotal;
       totalTax += o.tax || 0;
       totalDiscount += o.discount || 0;
-      if (o.paymentMethod === 'cash') cashSales += o.total;
-      else cardSales += o.total;
+      if (o.paymentMethod === 'cash') cashSales += netTotal;
+      else if (o.paymentMethod === 'vodafone') vodafoneSales += netTotal;
+      else cardSales += netTotal;
 
       o.items.forEach(item => {
-        totalCost += (item.costPrice * item.quantity);
+        const activeQty = item.quantity - (item.returnedQty || 0);
+        totalCost += (item.costPrice * activeQty);
       });
     });
 
@@ -220,6 +496,7 @@ export default function AdminPortal({
       totalSales,
       cashSales,
       cardSales,
+      vodafoneSales,
       totalTax,
       totalDiscount,
       totalCost,
@@ -249,7 +526,7 @@ export default function AdminPortal({
         if (timePart) {
           const hour = parseInt(timePart.split(':')[0], 10);
           if (hour >= 0 && hour < 24) {
-            hours[hour].total += order.total;
+            hours[hour].total += order.total - (order.returnedAmount || 0);
             hours[hour].count += 1;
           }
         }
@@ -504,31 +781,243 @@ export default function AdminPortal({
                   onChange={(e) => setFilterPayment(e.target.value as any)}
                   className="w-full bg-gray-50 border border-gray-200 rounded-lg p-2 text-xs focus:ring-1 focus:ring-black outline-none cursor-pointer font-bold"
                 >
-                  <option value="all">{lang === 'en' ? 'Cash & Visa' : 'جميع طرق السداد'}</option>
+                  <option value="all">{lang === 'en' ? 'All Payment Ways' : 'جميع طرق السداد'}</option>
                   <option value="cash">{lang === 'en' ? 'Cash Only (كاش)' : 'كاش نقدي فقط'}</option>
-                  <option value="card">{lang === 'en' ? 'Card Only (بطاقة)' : 'فيزا وبطاقات فقط'}</option>
+                  <option value="card">{lang === 'en' ? 'Visa / Card' : 'فيزا وبطاقات بنكية'}</option>
+                  <option value="vodafone">{lang === 'en' ? 'Vodafone Cash (فودافون كاش)' : 'فودافون كاش'}</option>
                 </select>
               </div>
 
               {/* Search text input */}
               <div className="space-y-1 text-right">
                 <label className="text-[10px] font-bold text-gray-500 uppercase">
-                  {lang === 'en' ? 'Invoice keyword search' : 'بحث بالباركود أو اسم الصنف'}
+                  {lang === 'en' ? 'Invoice keyword search' : 'البحث بالكلمة الرئيسية'}
                 </label>
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder={lang === 'en' ? 'Barcode, name..' : 'مثال: بندول، TKT-21...'}
-                  className="w-full bg-gray-50 border border-gray-200 rounded-lg p-2 text-xs focus:ring-1 focus:ring-black outline-none text-right"
+                  placeholder={lang === 'en' ? 'Scan SKU / Coupon / ID...' : 'ابحث بكود الصنف / الفاتوره...'}
+                  className="w-full bg-gray-50 border border-gray-200 rounded-lg p-2 text-xs focus:ring-1 focus:ring-black outline-none font-sans"
                 />
               </div>
 
             </div>
+
+          </div>
+
+          {/* DATABASE MAINTENANCE / PURGING BOARD FOR SELECTED PERIODS */}
+          <div className="bg-white border border-[#E5E7EB] p-4 rounded-2xl shadow-sm space-y-4 font-sans text-xs">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-right">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCleanupPanel(!showCleanupPanel);
+                  setDeleteError('');
+                  setDeleteSuccess('');
+                  setDeleteConfirmationText('');
+                }}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 transition cursor-pointer"
+              >
+                <Trash2 size={14} className="shrink-0" />
+                {lang === 'en' ? 'Delete/Reset Registered Sales Logs' : 'مسح وتصفير مبيعات الخزنة والأرقام'}
+                <span className="text-[10px]">{showCleanupPanel ? '▲' : '▼'}</span>
+              </button>
+              
+              <div className="text-right">
+                <h4 className="font-extrabold text-gray-800 text-xs text-right w-full">
+                  {lang === 'en' ? 'Administrative Data Operations' : 'لوحة مسح وتصفير سجل الأموال والمبيعات'}
+                </h4>
+                <p className="text-[10px] text-gray-400 mt-0.5 text-right w-full">
+                  {lang === 'en' ? 'Purge or zero transaction metrics easily' : 'صمام أمان لمسح الفواتير المسجلة نهائياً وتصفير الورديات المتأثرة لتصحيح الأخطاء'}
+                </p>
+              </div>
+            </div>
+
+            {showCleanupPanel && (
+              <motion.div 
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="p-4 bg-rose-50/40 border border-rose-100 rounded-xl space-y-4 text-right"
+              >
+                <div className="flex items-start gap-2.5 bg-white p-3 rounded-lg border border-rose-150 justify-end">
+                  <div className="space-y-1 text-right">
+                    <h5 className="font-bold text-rose-955 text-xs flex items-center gap-1.5 justify-end">
+                      {lang === 'en' ? 'Critical Warning: Irreversible Action' : 'صمام الأمان: تحذير حذف حساس وغير قابل للاسترداد'}
+                      <AlertTriangle size={15} className="text-rose-650 shrink-0" />
+                    </h5>
+                    <p className="text-[10.5px] text-rose-900 leading-relaxed text-right">
+                      {lang === 'en' 
+                        ? 'This tool will permanently delete the selected sales orders and shift expected cash files. Products, branches, and client database will remain untouched.'
+                        : 'تقوم هذه الأداة بمسح وحذف سجل الفلوس والمعاملات والفواتير المحددة أدناه بشكل نهائي لتصفير الحسابات أو مسح الأخطاء من الـ Database. لا يؤثر هذا الإجراء على أصناف المحل أو الشركاء أو المنتجات الأخرى.'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Scope Definition Form */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  
+                  {/* Period target choice */}
+                  <div className="space-y-1 text-right">
+                    <label className="text-[10px] font-bold text-gray-500 uppercase">
+                      {lang === 'en' ? 'Target Period' : 'الفترة المطلوب مسحها'}
+                    </label>
+                    <div className="grid grid-cols-2 gap-1 px-0.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDeleteScopeType('day');
+                          setDeleteSuccess('');
+                          setDeleteError('');
+                        }}
+                        className={`py-1.5 text-[10.5px] font-bold rounded-lg border transition ${
+                          deleteScopeType === 'day'
+                            ? 'bg-rose-600 text-white border-rose-600'
+                            : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                        }`}
+                      >
+                        {lang === 'en' ? 'Specific Day' : 'يوم معين محدد'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDeleteScopeType('all');
+                          setDeleteSuccess('');
+                          setDeleteError('');
+                        }}
+                        className={`py-1.5 text-[10.5px] font-bold rounded-lg border transition ${
+                          deleteScopeType === 'all'
+                            ? 'bg-rose-600 text-white border-rose-600'
+                            : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                        }`}
+                      >
+                        {lang === 'en' ? 'All Days' : 'كافة الأيام'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Day Date input */}
+                  <div className="space-y-1 text-right">
+                    <label className="text-[10px] font-bold text-gray-500 uppercase">
+                      {lang === 'en' ? 'Date to Purge' : 'تاريخ ومحور الحذف المطلوب'}
+                    </label>
+                    <input
+                      type="date"
+                      value={targetDateDelete}
+                      disabled={deleteScopeType === 'all'}
+                      onChange={(e) => {
+                        setTargetDateDelete(e.target.value);
+                        setDeleteSuccess('');
+                        setDeleteError('');
+                      }}
+                      className="w-full bg-white border border-gray-200 rounded-lg p-1.5 font-mono text-xs focus:ring-1 focus:ring-rose-500 outline-none cursor-pointer disabled:bg-gray-100 disabled:cursor-not-allowed"
+                    />
+                  </div>
+
+                  {/* Branch filter selection */}
+                  <div className="space-y-1 text-right">
+                    <label className="text-[10px] font-bold text-gray-500 uppercase">
+                      {lang === 'en' ? 'Branch Scope to delete' : 'الفرع المستهدف بالتصفير'}
+                    </label>
+                    <select
+                      value={targetShopDelete}
+                      onChange={(e) => {
+                        setTargetShopDelete(e.target.value);
+                        setDeleteSuccess('');
+                        setDeleteError('');
+                      }}
+                      className="w-full bg-white border border-gray-200 rounded-lg p-1.5 text-xs focus:ring-1 focus:ring-rose-500 outline-none font-bold cursor-pointer"
+                    >
+                      <option value="all">{lang === 'en' ? 'All Branches' : 'جميع الفروع والحدود'}</option>
+                      {shops.map(s => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                </div>
+
+                {/* Live affected stats preview */}
+                <div className="bg-rose-100/50 border border-rose-150 p-2.5 rounded-lg flex flex-col md:flex-row items-center justify-between gap-3 text-right text-xs">
+                  <div className="flex gap-2 items-center">
+                    <span className="bg-white border border-rose-200 text-rose-800 font-extrabold px-2.5 py-1 rounded-md text-[11px] font-mono text-right">
+                      {lang === 'en' ? 'Cash/Sales to be deleted:' : 'مجموع الأموال التي سيتم تصفيرها وحذفها:'}{' '}
+                      {deleteScopePreview.totalSum.toFixed(2)} EGP
+                    </span>
+                  </div>
+                  <div className="flex gap-4 text-[10.5px] text-rose-950 font-bold flex-wrap justify-end">
+                    <span>
+                      {lang === 'en' ? 'Matched Bills to delete:' : 'عدد الفواتير المطابقة:'}{' '}
+                      <span className="font-mono text-red-650 bg-white px-2 py-0.5 rounded border border-rose-200">{deleteScopePreview.ordersCount}</span>
+                    </span>
+                    <span>
+                      {lang === 'en' ? 'Matching Shifts affected:' : 'الورديات وجلسات الخزنة المتأثرة:'}{' '}
+                      <span className="font-mono text-red-650 bg-white px-2 py-0.5 rounded border border-rose-200">{deleteScopePreview.shiftsCount}</span>
+                    </span>
+                  </div>
+                </div>
+
+                {/* Type safety verification to proceed */}
+                <div className="bg-white border border-rose-150 p-3.5 rounded-lg space-y-3">
+                  <p className="text-[10px] text-gray-500 font-bold text-right">
+                    {lang === 'en' 
+                      ? '🔒 To proceed, please write the verification word [ CONFIRM ] in the field below to unlock the permanent delete action:'
+                      : '🔒 لتأكيد العملية وحماية البيانات، يرجى كتابة الكلمة [ تاكيد ] داخل المربع أدناه لتفعيل زر المسح:'}
+                  </p>
+
+                  <div className="flex flex-col sm:flex-row gap-2 items-stretch">
+                    <button
+                      type="button"
+                      onClick={handleClearMoney}
+                      disabled={isDeleting || deleteScopePreview.ordersCount === 0 || deleteConfirmationText.trim() !== (lang === 'ar' ? 'تاكيد' : 'CONFIRM')}
+                      className="px-5 py-2 bg-rose-600 text-white rounded-lg text-xs font-bold transition hover:bg-rose-700 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed shrink-0 flex items-center justify-center gap-1.5 cursor-pointer border-none"
+                    >
+                      {isDeleting ? (
+                        <>
+                          <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                          <span>{lang === 'en' ? 'Deleting records...' : 'جاري تبييض ومسح الخزنة الآن...'}</span>
+                        </>
+                      ) : (
+                        <>
+                          <Trash2 size={13} className="shrink-0" />
+                          <span>
+                            {deleteScopeType === 'day' 
+                              ? (lang === 'en' ? `Permanently Delete Day's Money Record` : `مسح وحذف مبيعات هذا اليوم المختار`) 
+                              : (lang === 'en' ? 'Delete ALL Days Sales from Store' : 'مسح وتصفير حساب كافة الأيام نهائياً')}
+                          </span>
+                        </>
+                      )}
+                    </button>
+
+                    <input
+                      type="text"
+                      dir="rtl"
+                      value={deleteConfirmationText}
+                      onChange={(e) => setDeleteConfirmationText(e.target.value)}
+                      placeholder={lang === 'en' ? 'Write CONFIRM here' : 'عليك كتابة كلمة [ تاكيد ] هنا لتفعيل الحذف'}
+                      className="flex-1 bg-gray-50 border border-rose-200 rounded-lg p-2 text-xs focus:ring-1 focus:ring-rose-500 outline-none text-right font-black shadow-inner leading-normal"
+                    />
+                  </div>
+                </div>
+
+                {/* Errors or positive feedback results */}
+                {deleteError && (
+                  <div className="p-2.5 bg-red-50 text-red-750 border border-red-250 rounded-lg font-bold text-center text-[11px]">
+                    {deleteError}
+                  </div>
+                )}
+                {deleteSuccess && (
+                  <div className="p-2.5 bg-emerald-50 text-emerald-850 border border-emerald-200 rounded-lg font-bold text-center text-[11px]">
+                    {deleteSuccess}
+                  </div>
+                )}
+
+              </motion.div>
+            )}
           </div>
 
           {/* DYNAMIC SUM STATISTICS CARDS FOR FILTERED AUDITING TARGETS */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
             
             {/* Audited Income Total */}
             <div className="bg-slate-950 text-white border border-slate-800 p-4 rounded-2xl flex flex-col justify-between shadow-sm relative overflow-hidden text-right">
@@ -572,13 +1061,29 @@ export default function AdminPortal({
                 <span className="text-[9px] uppercase font-mono font-bold text-gray-400 tracking-wider">
                   {lang === 'en' ? 'Direct Cash Sales drawer' : 'إجمالي مبيعات الـكـاش'}
                 </span>
-                <h4 className="text-lg md:text-xl font-bold font-mono tracking-tight text-gray-900 mt-1">
+                <h4 className="text-lg md:text-xl font-bold font-mono tracking-tight text-gray-950 mt-1">
                   {auditStats.cashSales.toFixed(2)}{' '}
                   <span className="text-xs font-sans font-medium text-gray-400">EGP</span>
                 </h4>
               </div>
               <p className="text-[9px] text-gray-400 mt-2 font-sans">
                 {lang === 'en' ? 'Cash stored physically in drawer flow' : 'المبلغ النقدى المفترض تواجده في الخزنة حالياً'}
+              </p>
+            </div>
+
+            {/* Vodafone Cash Amount */}
+            <div className="bg-white border border-gray-200 p-4 rounded-2xl flex flex-col justify-between shadow-sm text-right border-red-200">
+              <div className="space-y-1">
+                <span className="text-[9px] uppercase font-mono font-bold text-red-650 tracking-wider">
+                  {lang === 'en' ? 'Vodafone Cash Wallet' : 'إجمالي دفع فودافون كاش'}
+                </span>
+                <h4 className="text-lg md:text-xl font-bold font-mono tracking-tight text-red-650 mt-1">
+                  {(auditStats.vodafoneSales || 0).toFixed(2)}{' '}
+                  <span className="text-xs font-sans font-medium text-red-400">EGP</span>
+                </h4>
+              </div>
+              <p className="text-[9px] text-red-500 mt-2 font-sans font-bold">
+                {lang === 'en' ? 'Digital wallet, outside drawer' : 'محفظة فودافون الرقمية خارج الخزنة'}
               </p>
             </div>
 
@@ -714,10 +1219,29 @@ export default function AdminPortal({
 
                             <div className="text-left md:text-right">
                               <div className="text-[9px] text-gray-400 font-bold uppercase">{lang === 'en' ? 'Bill Amount' : 'قيمة الفاتورة'}</div>
-                              <div className="text-sm font-black font-mono text-gray-950">
-                                {order.total.toFixed(2)}{' '}
-                                <span className="text-[10px] font-sans font-medium text-gray-500">EGP</span>
-                              </div>
+                              {order.status === 'returned' ? (
+                                <div className="space-y-0.5">
+                                  <div className="text-sm font-black font-mono text-rose-600 line-through">
+                                    {order.total.toFixed(2)}{' '}
+                                    <span className="text-[10px] font-sans font-medium text-rose-500">EGP</span>
+                                  </div>
+                                  <div className="text-[9px] font-extrabold text-rose-700 bg-rose-50 border border-rose-100 px-1.5 py-0.5 rounded text-center inline-block">
+                                    {lang === 'en' ? 'FULLY REFUNDED' : 'مرتجع بالكامل'}
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="space-y-0.5">
+                                  <div className="text-sm font-black font-mono text-gray-950">
+                                    {(order.total - (order.returnedAmount || 0)).toFixed(2)}{' '}
+                                    <span className="text-[10px] font-sans font-medium text-gray-500">EGP</span>
+                                  </div>
+                                  {order.status === 'partially_returned' && (
+                                    <div className="text-[9px] font-extrabold text-amber-700 bg-amber-50 border border-amber-100 px-1.5 py-0.5 rounded text-center inline-block">
+                                      {lang === 'en' ? `REFUNDED (-${order.returnedAmount?.toFixed(2)})` : `مرتجع جزئي (-${order.returnedAmount?.toFixed(2)})`}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           </div>
 
@@ -726,10 +1250,18 @@ export default function AdminPortal({
                               <span className="text-[10px] text-gray-400 font-semibold">
                                 {getShopNameById(order.shopId)}
                               </span>
-                              <span className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full ${
-                                order.paymentMethod === 'cash' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-blue-50 text-blue-700 border border-blue-100'
+                              <span className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full border ${
+                                order.paymentMethod === 'cash' 
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-100' 
+                                  : order.paymentMethod === 'vodafone'
+                                    ? 'bg-red-50 text-red-600 border-red-200'
+                                    : 'bg-blue-50 text-blue-700 border-blue-100'
                               }`}>
-                                {order.paymentMethod === 'cash' ? (lang === 'en' ? 'CASH' : 'نقدي كاش') : (lang === 'en' ? 'VISA CARD' : 'بطاقة فيزا')}
+                                {order.paymentMethod === 'cash' 
+                                  ? (lang === 'en' ? 'CASH' : 'نقدي كاش') 
+                                  : order.paymentMethod === 'vodafone'
+                                    ? (lang === 'en' ? 'VODAFONE' : 'فودافون كاش')
+                                    : (lang === 'en' ? 'VISA CARD' : 'بطاقة فيزا')}
                               </span>
                               <span className="font-mono font-extrabold text-xs text-gray-900 bg-gray-100 px-2 py-0.5 rounded border border-gray-200 select-all">{order.id}</span>
                             </div>
@@ -759,20 +1291,62 @@ export default function AdminPortal({
                                 <span className="col-span-1 text-center">{lang === 'en' ? 'Disc' : 'خصم'}</span>
                                 <span className="col-span-2 text-center">{lang === 'en' ? 'Qty' : 'كمية'}</span>
                                 <span className="col-span-2 text-center">{lang === 'en' ? 'Price' : 'سعر لقطعة'}</span>
-                                <span className="col-span-5 text-right">{lang === 'en' ? 'Item Name' : 'اسم الصنف المنصرف'}</span>
+                                <span className="col-span-3 text-right">{lang === 'en' ? 'Item Name' : 'اسم الصنف المنصرف'}</span>
+                                <span className="col-span-2 text-right">{lang === 'en' ? 'Action' : 'مرتجع'}</span>
                               </div>
 
                               <div className="divide-y divide-gray-50">
                                 {order.items.map((item, index) => {
+                                  const alreadyReturned = item.returnedQty || 0;
+                                  const remainingQty = item.quantity - alreadyReturned;
+
                                   return (
                                     <div key={index} className="grid grid-cols-12 gap-1 py-1.5 text-[11px] items-center text-gray-850 font-sans">
-                                      <span className="col-span-2 text-left font-mono font-black text-gray-950">{item.total.toFixed(2)}</span>
+                                      <span className="col-span-2 text-left font-mono font-black text-gray-950">
+                                        {((item.total / item.quantity) * remainingQty).toFixed(2)}
+                                        {alreadyReturned > 0 && (
+                                          <div className="text-[9px] text-gray-400 font-normal line-through">
+                                            {item.total.toFixed(2)}
+                                          </div>
+                                        )}
+                                      </span>
                                       <span className="col-span-1 text-center font-mono text-red-500">-{item.discount}</span>
-                                      <span className="col-span-2 text-center font-mono font-bold text-gray-900">x{item.quantity}</span>
+                                      <div className="col-span-2 text-center flex flex-col items-center">
+                                        <span className="font-mono font-bold text-gray-900">x{item.quantity}</span>
+                                        {alreadyReturned > 0 && (
+                                          <span className="text-[8px] font-bold text-rose-600 bg-rose-50 border border-rose-105 px-1 rounded-sm mt-0.5">
+                                            {lang === 'en' ? `Ret: ${alreadyReturned}` : `مرتجع: ${alreadyReturned}`}
+                                          </span>
+                                        )}
+                                      </div>
                                       <span className="col-span-2 text-center font-mono">{item.sellingPrice.toFixed(2)}</span>
-                                      <div className="col-span-5 flex flex-col items-end">
+                                      <div className="col-span-3 flex flex-col items-end">
                                         <b className="font-extrabold text-gray-900 line-clamp-1">{item.name}</b>
                                         <span className="text-[9px] text-gray-400 font-mono">{item.barcode}</span>
+                                      </div>
+                                      <div className="col-span-2 text-right">
+                                        {remainingQty > 0 ? (
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setActiveReturnOrder(order);
+                                              setActiveReturnItem(item);
+                                              setReturnQty(remainingQty);
+                                              setReturnError('');
+                                              setReturnSuccess('');
+                                              setReturnModalOpen(true);
+                                            }}
+                                            className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-amber-50 text-amber-700 hover:bg-amber-100 transition rounded text-[10px] font-bold border border-amber-200 cursor-pointer"
+                                          >
+                                            <RotateCcw size={9} />
+                                            {lang === 'en' ? 'Return' : 'إرجاع'}
+                                          </button>
+                                        ) : (
+                                          <span className="text-[9px] font-bold text-rose-600 bg-rose-50 border border-rose-100 px-1 py-0.5 rounded">
+                                            {lang === 'en' ? 'Returned' : 'مرتجع'}
+                                          </span>
+                                        )}
                                       </div>
                                     </div>
                                   );
@@ -780,12 +1354,39 @@ export default function AdminPortal({
                               </div>
                             </div>
 
+                            {/* Full invoice refund trigger */}
+                            {order.status !== 'returned' && order.items.some(it => (it.quantity - (it.returnedQty || 0)) > 0) && (
+                              <div className="flex justify-end pt-1">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setActiveReturnOrder(order);
+                                    setActiveReturnItem(null);
+                                    setReturnQty(1);
+                                    setReturnError('');
+                                    setReturnSuccess('');
+                                    setReturnModalOpen(true);
+                                  }}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-[10px] border border-rose-150 transition cursor-pointer font-bold"
+                                >
+                                  <Undo2 size={12} />
+                                  {lang === 'en' ? 'Refund Entire Invoice' : 'إرجاع الفاتورة بالكامل'}
+                                </button>
+                              </div>
+                            )}
+
                             {/* Ticket Price Breakdown and Profit Audit */}
                             <div className="bg-slate-50 p-3 rounded-lg border border-gray-150 flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-[11px]">
                               <div className="space-y-1 font-mono text-left font-semibold text-gray-600 order-last sm:order-first">
                                 <div>{lang === 'en' ? 'Subtotal: ' : 'المجموع الفرعي لأسعار المنتجات: '}<b>{order.subtotal.toFixed(2)} EGP</b></div>
                                 <div>{lang === 'en' ? 'Overall Discount: ' : 'الخصم المطبق لزبون: '}<span className="text-red-500">-{order.discount.toFixed(2)} EGP</span></div>
-                                <div>{lang === 'en' ? 'Net profit from bill: ' : 'صافي ربح الدرج الفعلي من الفاتورة: '}<span className="text-emerald-700 font-black">+{((order.total) - order.items.reduce((acc, x) => acc + (x.costPrice * x.quantity), 0)).toFixed(2)} EGP</span></div>
+                                <div>
+                                  {lang === 'en' ? 'Net profit from bill: ' : 'صافي ربح الدرج الفعلي من الفاتورة: '}
+                                  <span className="text-emerald-700 font-black">
+                                    +{((order.total - (order.returnedAmount || 0)) - order.items.reduce((acc, x) => acc + (x.costPrice * (x.quantity - (x.returnedQty || 0))), 0)).toFixed(2)} EGP
+                                  </span>
+                                </div>
                               </div>
 
                               <div className="space-y-1 leading-normal text-gray-500 text-right">
@@ -1301,6 +1902,161 @@ export default function AdminPortal({
                   {lang === 'en' ? 'Any added products, customers, and receipts are uniquely encapsulated under this branch.' : 'أي صنف مخزون أو فواتير كاشير يتم جردها وعزلها بالكامل تحت اسم هذا الفرع لتسهيل التقارير.'}
                 </p>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Return & Refund Modal Overlay */}
+      {returnModalOpen && activeReturnOrder && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 font-sans text-right">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl border border-gray-150 overflow-hidden transform transition-all animate-in fade-in zoom-in-95 duration-200">
+            {/* Modal Header */}
+            <div className="bg-slate-900 text-white p-4 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => setReturnModalOpen(false)}
+                className="text-gray-400 hover:text-white transition cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+              <h3 className="font-extrabold text-sm flex items-center gap-2">
+                {activeReturnItem 
+                  ? (lang === 'en' ? 'Refunding Individual Item' : 'إرجاع صنف من الفاتورة')
+                  : (lang === 'en' ? 'Refunding Entire Invoice' : 'إرجاع واسترداد كامل الفاتورة')
+                }
+                <RotateCcw size={16} className="text-amber-400" />
+              </h3>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 space-y-4">
+              {/* Reference invoice */}
+              <div className="flex justify-between items-center bg-gray-50 border border-gray-100 p-2 rounded-lg text-xs">
+                <span className="font-mono font-bold text-gray-900 select-all">{activeReturnOrder.id}</span>
+                <span className="text-gray-400 font-bold">{lang === 'en' ? 'Invoice Number:' : 'رقم الفاتورة المرجعية:'}</span>
+              </div>
+
+              {activeReturnItem ? (
+                // Item Specific Return UI
+                <div className="space-y-4 font-sans text-xs text-right">
+                  <div className="bg-amber-50/50 border border-amber-100 p-3 rounded-lg space-y-1.5">
+                    <div className="font-extrabold text-gray-900 text-sm">{activeReturnItem.name}</div>
+                    <div className="text-[10px] text-gray-400 font-mono">{activeReturnItem.barcode}</div>
+                    <div className="flex justify-between items-center pt-1 text-[11px] border-t border-amber-100/50">
+                      <span className="font-mono font-bold text-gray-900">{(activeReturnItem.total / activeReturnItem.quantity).toFixed(2)} EGP</span>
+                      <span className="text-gray-500 font-bold">{lang === 'en' ? 'Unit Purchase Price:' : 'سعر شراء القطعة الفعلي:'}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="font-mono font-bold text-gray-900">
+                        {activeReturnItem.quantity - (activeReturnItem.returnedQty || 0)} {lang === 'en' ? 'units' : 'قطع'}
+                      </span>
+                      <span className="text-gray-500 font-bold">{lang === 'en' ? 'Available to Return:' : 'الكمية القابلة للإرجاع:'}</span>
+                    </div>
+                  </div>
+
+                  {/* Quantity selector */}
+                  <div className="space-y-2">
+                    <label className="block text-xs font-bold text-gray-700">
+                      {lang === 'en' ? 'Select Quantity to Return:' : 'حدد الكمية المطلوب إرجاعها:'}
+                    </label>
+                    <div className="flex items-center gap-3 justify-center">
+                      <button
+                        type="button"
+                        onClick={() => setReturnQty(q => Math.min(activeReturnItem.quantity - (activeReturnItem.returnedQty || 0), q + 1))}
+                        className="p-2 border border-gray-300 rounded-lg bg-gray-50 hover:bg-gray-100 transition font-bold text-lg w-10 h-10 flex items-center justify-center cursor-pointer select-none"
+                      >
+                        +
+                      </button>
+                      <input
+                        type="text"
+                        readOnly
+                        value={returnQty}
+                        className="border border-gray-300 rounded-lg text-center font-black text-sm w-20 h-10 outline-none bg-gray-50"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setReturnQty(q => Math.max(1, q - 1))}
+                        className="p-2 border border-gray-300 rounded-lg bg-gray-50 hover:bg-gray-100 transition font-bold text-lg w-10 h-10 flex items-center justify-center cursor-pointer select-none"
+                      >
+                        -
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Refund preview banner */}
+                  <div className="bg-emerald-50 border border-[#A7F3D0] p-3 rounded-lg flex justify-between items-center text-emerald-800">
+                    <span className="font-mono font-black text-sm">
+                      {((activeReturnItem.total / activeReturnItem.quantity) * returnQty).toFixed(2)} EGP
+                    </span>
+                    <span className="text-xs font-bold">
+                      {lang === 'en' ? 'Total Refund Amount:' : 'إجمالي القيمة المالية المستردة للمشتري:'}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                // Full Invoice Refund UI
+                <div className="space-y-3 text-xs text-right">
+                  <p className="text-gray-500 leading-relaxed">
+                    {lang === 'en'
+                      ? 'Are you sure you want to refund the entire invoice? All remaining quantities of products will be automatically returned to store stock, and the invoice will be fully settled.'
+                      : 'هل أنت متأكد من رغبتك في إسترجاع الفاتورة كاملة؟ سيتم إعادة كافة كميات المنتجات المتبقية إلى المخزون تلقائياً وإرجاع كامل المبلغ للزبون.'
+                    }
+                  </p>
+
+                  <div className="bg-rose-50 border border-rose-100 p-3 rounded-lg flex justify-between items-center text-rose-800">
+                    <span className="font-mono font-black text-sm">
+                      {(activeReturnOrder.total - (activeReturnOrder.returnedAmount || 0)).toFixed(2)} EGP
+                    </span>
+                    <span className="text-xs font-bold">
+                      {lang === 'en' ? 'Total Refund Amount:' : 'إجمالي المبلغ المسترد للمشتري:'}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Status responses */}
+              {returnError && (
+                <div className="p-3 bg-red-50 border border-red-100 text-red-600 rounded-lg text-xs font-bold leading-normal text-right">
+                  {returnError}
+                </div>
+              )}
+
+              {returnSuccess && (
+                <div className="p-3 bg-emerald-50 border border-[#A7F3D0] text-emerald-800 rounded-lg text-xs font-extrabold leading-normal text-right">
+                  {returnSuccess}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Actions */}
+            <div className="bg-gray-50 p-4 border-t border-gray-100 flex items-center gap-3 justify-end">
+              <button
+                type="button"
+                onClick={() => setReturnModalOpen(false)}
+                disabled={isRefunding}
+                className="px-4 py-2 bg-white border border-gray-300 rounded-lg text-xs font-bold text-gray-700 hover:bg-gray-50 transition cursor-pointer"
+              >
+                {lang === 'en' ? 'Cancel' : 'إلغاء الإجراء'}
+              </button>
+              
+              <button
+                type="button"
+                onClick={handleProcessReturn}
+                disabled={isRefunding || !!returnSuccess}
+                className={`px-5 py-2 text-xs font-extrabold rounded-lg text-white transition cursor-pointer flex items-center gap-1.5 ${
+                  activeReturnItem 
+                    ? 'bg-amber-600 hover:bg-amber-700' 
+                    : 'bg-rose-600 hover:bg-rose-700'
+                } disabled:opacity-50`}
+              >
+                {isRefunding ? (
+                  <span className="animate-spin text-white">⚙️</span>
+                ) : (
+                  <Check size={14} />
+                )}
+                {lang === 'en' ? 'Confirm Return' : 'تأكيد إرجاع البضاعة'}
+              </button>
             </div>
           </div>
         </div>
