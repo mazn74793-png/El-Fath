@@ -90,5 +90,11 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     path
   };
   console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  // To protect UX and prevent Vite's development error overlay from blocking the screen,
+  // we do not throw a blocking uncaught exception for read/list operations.
+  // We throw for write/create/delete mutations so that UI action handlers can catch them.
+  if (operationType === OperationType.CREATE || operationType === OperationType.UPDATE || 
+      operationType === OperationType.DELETE || operationType === OperationType.WRITE) {
+    throw new Error(JSON.stringify(errInfo));
+  }
 }
