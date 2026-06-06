@@ -3,11 +3,30 @@ import { getAuth, signInAnonymously } from 'firebase/auth';
 import { getFirestore, enableIndexedDbPersistence, doc, getDocFromServer } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
-const app = initializeApp(firebaseConfig);
+// Support Vercel/Production environment variables priority, falling back to firebase-applet-config.json
+const apiConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || firebaseConfig.apiKey,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || firebaseConfig.authDomain,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || firebaseConfig.projectId,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || firebaseConfig.storageBucket,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || firebaseConfig.messagingSenderId,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || firebaseConfig.appId,
+  firestoreDatabaseId: import.meta.env.VITE_FIREBASE_DATA_ID || firebaseConfig.firestoreDatabaseId
+};
+
+const app = initializeApp({
+  apiKey: apiConfig.apiKey,
+  authDomain: apiConfig.authDomain,
+  projectId: apiConfig.projectId,
+  storageBucket: apiConfig.storageBucket,
+  messagingSenderId: apiConfig.messagingSenderId,
+  appId: apiConfig.appId
+});
+
 export const auth = getAuth(app);
 
 // Use the critical firestoreDatabaseId matching our custom provisioned database
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const db = getFirestore(app, apiConfig.firestoreDatabaseId);
 
 // Enable offline-first IndexedDB persistence
 enableIndexedDbPersistence(db)

@@ -977,6 +977,7 @@ export default function App() {
               {activeTab === 'pos' && (
                 <POS 
                   products={activeScopedProducts}
+                  orders={activeScopedOrders}
                   activeShift={activeScopedShift}
                   onCheckout={handleCheckoutOrder}
                   onNavigate={setActiveTab}

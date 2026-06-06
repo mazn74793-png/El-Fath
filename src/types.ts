@@ -41,7 +41,7 @@ export interface OrderLineItem {
   quantity: number;
   discount: number;
   total: number;
-  returnedQty?: number; // quantity returned
+  returnedQty?: number; // Added for tracking returns
 }
 
 export interface SalesOrder {
@@ -57,8 +57,8 @@ export interface SalesOrder {
   paymentMethod: 'cash' | 'card' | 'vodafone';
   createdAt: string;
   shopId?: string; // Multi-shop scope association
-  status?: 'completed' | 'returned' | 'partially_returned'; // return status
-  returnedAmount?: number; // total amount refunded so far
+  status?: 'paid' | 'returned' | 'partially_returned'; // Track refund state
+  returnedAmount?: number; // Refund aggregate amount
 }
 
 export interface Shift {
@@ -119,4 +119,10 @@ export interface DatabaseState {
   sales_orders: Record<string, SalesOrder>;
   shifts: Record<string, Shift>;
   repairs: Record<string, RepairOrder>;
+}
+
+declare global {
+  interface ImportMeta {
+    readonly env: Record<string, any>;
+  }
 }

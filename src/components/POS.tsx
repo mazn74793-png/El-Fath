@@ -24,13 +24,18 @@ import {
   ChevronRight,
   ShieldCheck,
   Percent,
-  X
+  X,
+  Undo2,
+  History
 } from 'lucide-react';
 import { Product, CartItem, SalesOrder, Shift } from '../types';
 import { CATEGORIES } from '../data';
+import { db, handleFirestoreError, OperationType, sanitizeData } from '../firebase';
+import { doc, setDoc } from 'firebase/firestore';
 
 interface POSProps {
   products: Product[];
+  orders: SalesOrder[];
   activeShift: Shift | null;
   onCheckout: (order: Omit<SalesOrder, 'id' | 'createdAt'>) => void;
   onNavigate: (tab: string) => void;
@@ -38,7 +43,7 @@ interface POSProps {
   currencySymbol?: string;
 }
 
-export default function POS({ products, activeShift, onCheckout, onNavigate, lang = 'en', currencySymbol }: POSProps) {
+export default function POS({ products, orders, activeShift, onCheckout, onNavigate, lang = 'en', currencySymbol }: POSProps) {
   const symbol = currencySymbol || (lang === 'ar' ? 'ج.م' : 'EGP');
   // Cart items state
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -59,6 +64,18 @@ export default function POS({ products, activeShift, onCheckout, onNavigate, lan
 
   // Status message for barcode scan feedback
   const [scanMessage, setScanMessage] = useState<{ text: string; type: 'success' | 'err' } | null>(null);
+
+  // Invoice History and Refund Dialog States for Cashiers
+  const [invoiceHistoryOpen, setInvoiceHistoryOpen] = useState(false);
+  const [invoiceHistorySearch, setInvoiceHistorySearch] = useState('');
+  
+  const [returnModalOpen, setReturnModalOpen] = useState(false);
+  const [activeReturnOrder, setActiveReturnOrder] = useState<SalesOrder | null>(null);
+  const [activeReturnItem, setActiveReturnItem] = useState<any | null>(null);
+  const [returnQty, setReturnQty] = useState<number>(1);
+  const [isRefunding, setIsRefunding] = useState(false);
+  const [returnError, setReturnError] = useState('');
+  const [returnSuccess, setReturnSuccess] = useState('');
 
   const barcodeInputRef = useRef<HTMLInputElement>(null);
 
@@ -270,6 +287,132 @@ export default function POS({ products, activeShift, onCheckout, onNavigate, lan
     }
   };
 
+  // Handle Return action for Cashier
+  const handleProcessReturn = async () => {
+    if (!activeReturnOrder) return;
+    setIsRefunding(true);
+    setReturnError('');
+    setReturnSuccess('');
+
+    try {
+      if (activeReturnItem) {
+        // Individual item partial/full return
+        const alreadyReturned = activeReturnItem.returnedQty || 0;
+        const maxAvailable = activeReturnItem.quantity - alreadyReturned;
+        if (returnQty < 1 || returnQty > maxAvailable) {
+          setReturnError(lang === 'en' ? 'Invalid return quantity.' : 'كمية المرتجع غير صالحة.');
+          setIsRefunding(false);
+          return;
+        }
+
+        // Calculate refund value per unit matching the actual checkout formula
+        const unitRefundAmount = activeReturnItem.total / activeReturnItem.quantity;
+        const totalRefundValue = unitRefundAmount * returnQty;
+
+        // Upgrade item details and determine order status
+        const updatedItems = activeReturnOrder.items.map(item => {
+          if (item.productId === activeReturnItem.productId) {
+            return {
+              ...item,
+              returnedQty: (item.returnedQty || 0) + returnQty
+            };
+          }
+          return item;
+        });
+
+        // Did everything in the invoice get returned?
+        const isAllReturned = updatedItems.every(item => (item.returnedQty || 0) >= item.quantity);
+        const orderStatus = isAllReturned ? 'returned' : 'partially_returned';
+        const newReturnedAmount = (activeReturnOrder.returnedAmount || 0) + totalRefundValue;
+
+        // Write order change to Firestore
+        const updatedOrder: SalesOrder = {
+          ...activeReturnOrder,
+          items: updatedItems,
+          status: orderStatus,
+          returnedAmount: Number(newReturnedAmount.toFixed(2))
+        };
+
+        // Standard Firestore setDoc
+        await setDoc(doc(db, 'sales_orders', activeReturnOrder.id), sanitizeData(updatedOrder));
+
+        // Put quantity back into the branch product stock
+        const prod = products.find(p => p.id === activeReturnItem.productId);
+        if (prod) {
+          await setDoc(doc(db, 'products', prod.id), sanitizeData({
+            ...prod,
+            quantity: prod.quantity + returnQty,
+            updatedAt: new Date().toISOString()
+          }));
+        }
+
+        setReturnSuccess(lang === 'en' 
+          ? `Successfully refunded ${returnQty}x of "${activeReturnItem.name}" totaling ${totalRefundValue.toFixed(2)} EGP.`
+          : `تم بنجاح إرجاع عدد ${returnQty} من "${activeReturnItem.name}" وإعادة إجمالي ${totalRefundValue.toFixed(2)} ج.م للمشتري.`
+        );
+      } else {
+        // Full Invoice refund
+        let totalRefundValue = 0;
+        
+        // Return remaining goods to active inventory
+        for (const item of activeReturnOrder.items) {
+          const alreadyReturned = item.returnedQty || 0;
+          const remainingToReturn = item.quantity - alreadyReturned;
+
+          if (remainingToReturn > 0) {
+            const unitRefundAmount = item.total / item.quantity;
+            totalRefundValue += unitRefundAmount * remainingToReturn;
+
+            const prod = products.find(p => p.id === item.productId);
+            if (prod) {
+              await setDoc(doc(db, 'products', prod.id), sanitizeData({
+                ...prod,
+                quantity: prod.quantity + remainingToReturn,
+                updatedAt: new Date().toISOString()
+              }));
+            }
+          }
+        }
+
+        // Tag every item inside the invoice as fully returned
+        const updatedItems = activeReturnOrder.items.map(item => ({
+          ...item,
+          returnedQty: item.quantity
+        }));
+
+        const updatedOrder: SalesOrder = {
+          ...activeReturnOrder,
+          items: updatedItems,
+          status: 'returned',
+          returnedAmount: activeReturnOrder.total
+        };
+
+        await setDoc(doc(db, 'sales_orders', activeReturnOrder.id), sanitizeData(updatedOrder));
+
+        setReturnSuccess(lang === 'en'
+          ? `Successfully refunded full invoice "${activeReturnOrder.id}" with total refund of ${activeReturnOrder.total.toFixed(2)} EGP.`
+          : `تم بنجاح إرجاع الفاتورة رقم "${activeReturnOrder.id}" بالكامل وإعادة ${activeReturnOrder.total.toFixed(2)} ج.م وموازنة المخزون.`
+        );
+      }
+
+      // Automatically reset modal states or close on success delay
+      setTimeout(() => {
+        setReturnModalOpen(false);
+        setActiveReturnOrder(null);
+        setActiveReturnItem(null);
+        setReturnQty(1);
+        setReturnSuccess('');
+        setReturnError('');
+      }, 2000);
+
+    } catch (err) {
+      console.error(err);
+      setReturnError(lang === 'en' ? 'Failed to process return in database.' : 'فشل تسجيل الارتجاع في قاعدة البيانات.');
+    } finally {
+      setIsRefunding(false);
+    }
+  };
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 h-[calc(100vh-140px)] select-none">
       
@@ -314,6 +457,15 @@ export default function POS({ products, activeShift, onCheckout, onNavigate, lan
               </form>
             )}
           </div>
+
+          <button
+            type="button"
+            onClick={() => setInvoiceHistoryOpen(true)}
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-lg text-xs transition shrink-0 flex items-center gap-1.5 cursor-pointer shadow-sm select-none"
+          >
+            <History size={14} />
+            {lang === 'en' ? 'Invoices & Returns' : 'الفواتير والمرتجعات'}
+          </button>
 
           {/* Alert Feed-back status line */}
           <AnimatePresence>
@@ -822,6 +974,404 @@ export default function POS({ products, activeShift, onCheckout, onNavigate, lan
                   className="w-full py-2 bg-black hover:bg-[#222222] text-white font-bold rounded-lg text-xs transition"
                 >
                   {lang === 'en' ? 'Confirm & Open New Sale Transaction' : 'تأكيد وبدء معاملة بيع جديدة'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* CASHIER INVOICE HISTORY & SEARCH OVERLAY */}
+      <AnimatePresence>
+        {invoiceHistoryOpen && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-40 p-4 font-sans text-right">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-2xl w-full max-w-4xl h-[85vh] shadow-2xl border border-gray-200 flex flex-col overflow-hidden text-right"
+            >
+              {/* Modal Header */}
+              <div className="bg-slate-900 text-white p-5 flex items-center justify-between shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setInvoiceHistoryOpen(false)}
+                  className="text-gray-400 hover:text-white transition cursor-pointer p-1 rounded-full hover:bg-slate-800"
+                >
+                  <X size={20} />
+                </button>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-extrabold text-base">
+                    {lang === 'en' ? 'Invoice History & Product Returns' : 'سجل الفواتير والمرتجعات - الكاشير'}
+                  </h3>
+                  <History size={20} className="text-emerald-400" />
+                </div>
+              </div>
+
+              {/* Modal Body - Search and Scroll Container */}
+              <div className="p-5 flex-grow overflow-hidden flex flex-col space-y-4">
+                {/* Search query box */}
+                <div className="relative shrink-0">
+                  <Search size={16} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="text"
+                    value={invoiceHistorySearch}
+                    onChange={(e) => setInvoiceHistorySearch(e.target.value)}
+                    placeholder={
+                      lang === 'en'
+                        ? 'Search invoices by receipt token, product name or barcode, cash/card...'
+                        : 'البحث في الفواتير برقم الفاتورة، اسم المنتج أو كود الباركود، طريقة دفع...'
+                    }
+                    className="w-full pr-10 pl-4 py-2.5 bg-gray-50 border border-gray-200 focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 rounded-lg text-xs outline-none transition text-right"
+                  />
+                </div>
+
+                {/* Scrollable list of results */}
+                <div className="flex-grow overflow-y-auto pr-1 space-y-4">
+                  {orders.filter(order => {
+                    if (!invoiceHistorySearch.trim()) return true;
+                    const query = invoiceHistorySearch.toLowerCase().trim();
+                    const matchesId = order.id.toLowerCase().includes(query);
+                    const matchesStatus = order.status.toLowerCase().includes(query);
+                    const matchesPayment = order.paymentMethod.toLowerCase().includes(query);
+                    const matchesProduct = order.items.some(item => item.name.toLowerCase().includes(query));
+                    return matchesId || matchesStatus || matchesPayment || matchesProduct;
+                  }).length === 0 ? (
+                    <div className="text-center py-12 text-gray-400 text-xs font-semibold">
+                      {lang === 'en' ? 'No sales receipts found matching your search.' : 'لم يتم العثور على أي فواتير تطابق البحث الحالي.'}
+                    </div>
+                  ) : (
+                    orders.filter(order => {
+                      if (!invoiceHistorySearch.trim()) return true;
+                      const query = invoiceHistorySearch.toLowerCase().trim();
+                      const matchesId = order.id.toLowerCase().includes(query);
+                      const matchesStatus = order.status.toLowerCase().includes(query);
+                      const matchesPayment = order.paymentMethod.toLowerCase().includes(query);
+                      const matchesProduct = order.items.some(item => item.name.toLowerCase().includes(query));
+                      return matchesId || matchesStatus || matchesPayment || matchesProduct;
+                    }).map((order) => {
+                      const isReturnedFull = order.status === 'returned';
+                      const isReturnedPartial = order.status === 'partially_returned';
+                      
+                      return (
+                        <div 
+                          key={order.id} 
+                          className={`bg-white border rounded-xl p-4 transition duration-150 shadow-xs hover:shadow-md ${
+                            isReturnedFull 
+                              ? 'border-red-150 bg-red-50/5' 
+                              : isReturnedPartial 
+                              ? 'border-amber-150 bg-amber-50/5' 
+                              : 'border-gray-200'
+                          }`}
+                        >
+                          {/* Invoice top summary metadata */}
+                          <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-gray-100 flex-row-reverse text-xs">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono font-black text-gray-900 bg-gray-100 px-2 py-1 rounded select-all">{order.id}</span>
+                              <span className="text-gray-400 font-bold">{lang === 'en' ? 'Ticket ID:' : 'رقم الفاتورة:'}</span>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 font-bold font-mono text-gray-500">
+                              <span>{new Date(order.createdAt).toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-US')}</span>
+                            </div>
+
+                            <div className="flex items-center gap-2 flex-row-reverse">
+                              {isReturnedFull && (
+                                <span className="bg-red-100 text-red-800 px-2 py-0.5 rounded-full text-[10px] font-extrabold">
+                                  {lang === 'en' ? 'Fully Returned' : 'مرتجع الفاتورة بالكامل'}
+                                </span>
+                              )}
+                              {isReturnedPartial && (
+                                <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full text-[10px] font-extrabold flex items-center gap-1">
+                                  <span>{lang === 'en' ? 'Partially Returned' : 'مرتجع جزئي'}</span>
+                                  {order.returnedAmount && (
+                                    <span className="font-mono">({order.returnedAmount.toFixed(2)} EGP)</span>
+                                  )}
+                                </span>
+                              )}
+                              {!isReturnedFull && !isReturnedPartial && (
+                                <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full text-[10px] font-extrabold">
+                                  {lang === 'en' ? 'Settled & Paid' : 'مدفوعة بالكامل'}
+                                </span>
+                              )}
+                              <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase font-mono">
+                                {order.paymentMethod === 'vodafone' ? 'VODAFONE CASH' : order.paymentMethod}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Invoice purchased items breakdown list */}
+                          <div className="py-3 space-y-2 text-right overflow-x-auto">
+                            <table className="w-full text-right text-xs min-w-[500px]">
+                              <thead>
+                                <tr className="text-gray-400 font-extrabold border-b border-gray-100 pb-1 flex-row-reverse">
+                                  <th className="py-1 text-right">{lang === 'en' ? 'Product Description / Name' : 'اسم الصنف أو المنتج البائع'}</th>
+                                  <th className="py-1 text-center w-24">{lang === 'en' ? 'Original Qty' : 'الكمية الأصلية'}</th>
+                                  <th className="py-1 text-center w-24">{lang === 'en' ? 'Returned Qty' : 'الكمية المسترجعة'}</th>
+                                  <th className="py-1 text-left w-28">{lang === 'en' ? 'Effective Price' : 'إجمالي السعر الفعلي'}</th>
+                                  <th className="py-1 text-left w-20"></th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {order.items.map((item) => {
+                                  const alreadyReturned = item.returnedQty || 0;
+                                  const matchesFilter = !invoiceHistorySearch.trim() || item.name.toLowerCase().includes(invoiceHistorySearch.toLowerCase().trim());
+                                  
+                                  return (
+                                    <tr 
+                                      key={item.productId} 
+                                      className={`border-b border-gray-50/50 hover:bg-gray-50/50 ${
+                                        alreadyReturned >= item.quantity 
+                                          ? 'text-gray-400 line-through' 
+                                          : matchesFilter 
+                                          ? 'font-bold' 
+                                          : 'text-gray-600'
+                                      }`}
+                                    >
+                                      <td className="py-2 text-right">
+                                        <div className="font-extrabold text-xs">{item.name}</div>
+                                        <div className="text-[9px] text-gray-400 font-mono tracking-wide">{item.barcode}</div>
+                                      </td>
+                                      <td className="py-2 text-center font-mono font-medium">{item.quantity}</td>
+                                      <td className="py-2 text-center font-mono text-red-600 font-bold">{alreadyReturned}</td>
+                                      <td className="py-2 text-left font-mono font-black text-gray-900">
+                                        {item.total.toFixed(2)} {symbol}
+                                      </td>
+                                      <td className="py-2 text-left">
+                                        {alreadyReturned < item.quantity && !isReturnedFull && (
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setActiveReturnOrder(order);
+                                              setActiveReturnItem(item);
+                                              setReturnQty(1);
+                                              setReturnModalOpen(true);
+                                              setReturnError('');
+                                              setReturnSuccess('');
+                                            }}
+                                            className="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded text-[10px] font-extrabold transition cursor-pointer"
+                                          >
+                                            {lang === 'en' ? 'Refund Spec' : 'إرجاع صنف'}
+                                          </button>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+
+                          {/* Invoice totals and full refund button */}
+                          <div className="flex flex-row-reverse flex-wrap items-center justify-between pt-3 border-t border-gray-100 text-xs">
+                            <div className="flex gap-4 font-extrabold text-sm text-gray-900">
+                              <div className="flex gap-1 flex-row-reverse">
+                                <span className="font-mono text-emerald-600">{(order.total - (order.returnedAmount || 0)).toFixed(2)} {symbol}</span>
+                                <span className="text-gray-500">{lang === 'en' ? 'Net Paid:' : 'الصافي الحالي:'}</span>
+                              </div>
+                              <div className="flex gap-1 border-r border-gray-200 pr-4 flex-row-reverse">
+                                <span className="font-mono text-gray-400">{order.total.toFixed(2)} {symbol}</span>
+                                <span className="text-gray-400 font-bold">{lang === 'en' ? 'Original Total:' : 'إجمالي الفاتورة الاصلي:'}</span>
+                              </div>
+                            </div>
+
+                            {!isReturnedFull && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveReturnOrder(order);
+                                  setActiveReturnItem(null);
+                                  setReturnQty(1);
+                                  setReturnModalOpen(true);
+                                  setReturnError('');
+                                  setReturnSuccess('');
+                                }}
+                                className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-xs font-black transition cursor-pointer flex items-center gap-1"
+                              >
+                                <RotateCcw size={12} />
+                                {lang === 'en' ? 'Refund Entire Invoice' : 'إرجاع واسترداد كامل الفاتورة'}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              {/* Modal Footer */}
+              <div className="bg-gray-50 p-4 border-t border-gray-100 shrink-0 flex items-center justify-end font-sans">
+                <button
+                  type="button"
+                  onClick={() => setInvoiceHistoryOpen(false)}
+                  className="px-5 py-2 bg-white hover:bg-gray-100 border border-gray-300 rounded-lg text-xs font-extrabold text-gray-700 transition cursor-pointer"
+                >
+                  {lang === 'en' ? 'Close' : 'إغلاق المتصفح'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* RETURN & REFUND CONFIRMATION MODAL OVERLAY */}
+      <AnimatePresence>
+        {returnModalOpen && activeReturnOrder && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 font-sans text-right">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-2xl w-full max-w-md shadow-2xl border border-gray-200 overflow-hidden transform transition-all text-right"
+            >
+              {/* Modal Header */}
+              <div className="bg-slate-900 text-white p-4 flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => setReturnModalOpen(false)}
+                  className="text-gray-400 hover:text-white transition cursor-pointer p-0.5 rounded hover:bg-slate-800"
+                >
+                  <X size={18} />
+                </button>
+                <h3 className="font-extrabold text-sm flex items-center gap-2">
+                  {activeReturnItem 
+                    ? (lang === 'en' ? 'Refunding Individual Item' : 'إرجاع صنف من الفاتورة')
+                    : (lang === 'en' ? 'Refunding Entire Invoice' : 'إرجاع واسترداد كامل الفاتورة')
+                  }
+                  <RotateCcw size={16} className="text-amber-400" />
+                </h3>
+              </div>
+
+              {/* Modal Body */}
+              <div className="p-5 space-y-4">
+                {/* Reference invoice */}
+                <div className="flex justify-between items-center bg-gray-50 border border-gray-100 p-2 rounded-lg text-xs flex-row-reverse">
+                  <span className="font-mono font-bold text-gray-900 select-all">{activeReturnOrder.id}</span>
+                  <span className="text-gray-400 font-bold">{lang === 'en' ? 'Invoice Number:' : 'رقم الفاتورة المرجعية:'}</span>
+                </div>
+
+                {activeReturnItem ? (
+                  // Item Specific Return UI
+                  <div className="space-y-4 font-sans text-xs text-right">
+                    <div className="bg-amber-50/50 border border-amber-100 p-3 rounded-lg space-y-1.5 text-right">
+                      <div className="font-extrabold text-gray-900 text-sm">{activeReturnItem.name}</div>
+                      <div className="text-[10px] text-gray-400 font-mono">{activeReturnItem.barcode}</div>
+                      <div className="flex justify-between items-center pt-1 text-[11px] border-t border-amber-100/50 flex-row-reverse">
+                        <span className="font-mono font-bold text-gray-900">
+                          {(activeReturnItem.total / activeReturnItem.quantity).toFixed(2)} EGP
+                        </span>
+                        <span className="text-gray-400 font-semibold">{lang === 'en' ? 'Unit Purchase Price:' : 'سعر شراء القطعة الفعلي:'}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-[11px] flex-row-reverse">
+                        <span className="font-mono font-bold text-gray-900 text-right">
+                          {activeReturnItem.quantity - (activeReturnItem.returnedQty || 0)} {lang === 'en' ? 'units' : 'قطع'}
+                        </span>
+                        <span className="text-gray-400 font-semibold">{lang === 'en' ? 'Available to Return:' : 'الكمية القابلة للإرجاع:'}</span>
+                      </div>
+                    </div>
+
+                    {/* Quantity selector */}
+                    <div className="space-y-2">
+                      <label className="block text-xs font-bold text-gray-750 text-right">
+                        {lang === 'en' ? 'Select Quantity to Return:' : 'حدد الكمية المطلوب إرجاعها:'}
+                      </label>
+                      <div className="flex items-center gap-3 justify-center">
+                        <button
+                          type="button"
+                          onClick={() => setReturnQty(q => Math.min(activeReturnItem.quantity - (activeReturnItem.returnedQty || 0), q + 1))}
+                          className="p-2 border border-gray-300 rounded-lg bg-gray-50 hover:bg-gray-100 transition font-bold text-lg w-10 h-10 flex items-center justify-center cursor-pointer select-none"
+                        >
+                          +
+                        </button>
+                        <input
+                          type="text"
+                          readOnly
+                          value={returnQty}
+                          className="border border-gray-300 rounded-lg text-center font-black text-sm w-20 h-10 outline-none bg-gray-50 font-mono"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setReturnQty(q => Math.max(1, q - 1))}
+                          className="p-2 border border-gray-300 rounded-lg bg-gray-50 hover:bg-gray-100 transition font-bold text-lg w-10 h-10 flex items-center justify-center cursor-pointer select-none"
+                        >
+                          -
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Refund preview banner */}
+                    <div className="bg-emerald-50 border border-emerald-150 p-3 rounded-lg flex justify-between items-center text-emerald-800 flex-row-reverse">
+                      <span className="font-mono font-black text-sm">
+                        {((activeReturnItem.total / activeReturnItem.quantity) * returnQty).toFixed(2)} EGP
+                      </span>
+                      <span className="text-xs font-bold text-right">
+                        {lang === 'en' ? 'Total Refund Amount:' : 'إجمالي القيمة المالية المستردة للمشتري:'}
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  // Full Invoice Refund UI
+                  <div className="space-y-3 text-xs text-right text-gray-600">
+                    <p className="leading-relaxed">
+                      {lang === 'en'
+                        ? 'Are you sure you want to refund the entire invoice? All remaining quantities of products will be automatically returned to store inventory stock, and the invoice will be fully settled.'
+                        : 'هل أنت متأكد من رغبتك في إسترجاع الفاتورة كاملة؟ سيتم إعادة كافة كميات المنتجات المتبقية إلى المخزون تلقائياً وإرجاع كامل المبلغ للزبون.'
+                      }
+                    </p>
+
+                    <div className="bg-rose-50 border border-rose-100 p-3 rounded-lg flex justify-between items-center text-rose-800 flex-row-reverse">
+                      <span className="font-mono font-black text-sm">
+                        {(activeReturnOrder.total - (activeReturnOrder.returnedAmount || 0)).toFixed(2)} EGP
+                      </span>
+                      <span className="text-xs font-bold">
+                        {lang === 'en' ? 'Total Refund Amount:' : 'إجمالي المبلغ المسترد للمشتري:'}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Status responses */}
+                {returnError && (
+                  <div className="p-3 bg-red-50 border border-red-100 text-red-600 rounded-lg text-xs font-bold leading-normal text-right">
+                    {returnError}
+                  </div>
+                )}
+
+                {returnSuccess && (
+                  <div className="p-3 bg-emerald-50 border border-emerald-100 text-emerald-800 rounded-lg text-xs font-extrabold leading-normal text-right">
+                    {returnSuccess}
+                  </div>
+                )}
+              </div>
+
+              {/* Modal Actions */}
+              <div className="bg-gray-50 p-4 border-t border-gray-100 flex items-center gap-3 justify-end font-sans">
+                <button
+                  type="button"
+                  onClick={() => setReturnModalOpen(false)}
+                  disabled={isRefunding}
+                  className="px-4 py-2 bg-white border border-gray-300 rounded-lg text-xs font-bold text-gray-700 hover:bg-gray-50 transition cursor-pointer"
+                >
+                  {lang === 'en' ? 'Cancel' : 'إلغاء الإجراء'}
+                </button>
+                
+                <button
+                  type="button"
+                  onClick={handleProcessReturn}
+                  disabled={isRefunding || !!returnSuccess}
+                  className={`px-5 py-2 text-xs font-black rounded-lg text-white transition cursor-pointer flex items-center gap-1.5 ${
+                    activeReturnItem 
+                      ? 'bg-amber-600 hover:bg-amber-700' 
+                      : 'bg-rose-600 hover:bg-rose-700'
+                  } disabled:opacity-50`}
+                >
+                  {isRefunding ? (
+                    <span className="animate-spin text-white">⚙️</span>
+                  ) : (
+                    <CheckCircle size={14} />
+                  )}
+                  {lang === 'en' ? 'Confirm Return' : 'تأكيد إرجاع البضاعة'}
                 </button>
               </div>
             </motion.div>
