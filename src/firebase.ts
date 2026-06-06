@@ -3,15 +3,25 @@ import { getAuth, signInAnonymously } from 'firebase/auth';
 import { getFirestore, enableIndexedDbPersistence, doc, getDocFromServer } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
-// Support Vercel/Production environment variables priority, falling back to firebase-applet-config.json
+// Support Vercel/Production environment variables priority, falling back to firebase-applet-config.json or hardcoded literals
+const HARDCODED_CONFIG = {
+  apiKey: "AIzaSyAIpD27uk57hwXJtbJm1sfRp4UgPi77g3k",
+  authDomain: "gen-lang-client-0849793585.firebaseapp.com",
+  projectId: "gen-lang-client-0849793585",
+  storageBucket: "gen-lang-client-0849793585.firebasestorage.app",
+  messagingSenderId: "901992737099",
+  appId: "1:901992737099:web:e701ce4531a7fe0a1be0ce",
+  firestoreDatabaseId: "ai-studio-9418b41d-8c6a-4d09-b4fc-be1038f19679"
+};
+
 const apiConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || firebaseConfig.apiKey,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || firebaseConfig.authDomain,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || firebaseConfig.projectId,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || firebaseConfig.storageBucket,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || firebaseConfig.messagingSenderId,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || firebaseConfig.appId,
-  firestoreDatabaseId: import.meta.env.VITE_FIREBASE_DATA_ID || firebaseConfig.firestoreDatabaseId
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || firebaseConfig.apiKey || HARDCODED_CONFIG.apiKey,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || firebaseConfig.authDomain || HARDCODED_CONFIG.authDomain,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || firebaseConfig.projectId || HARDCODED_CONFIG.projectId,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || firebaseConfig.storageBucket || HARDCODED_CONFIG.storageBucket,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || firebaseConfig.messagingSenderId || HARDCODED_CONFIG.messagingSenderId,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || firebaseConfig.appId || HARDCODED_CONFIG.appId,
+  firestoreDatabaseId: import.meta.env.VITE_FIREBASE_DATA_ID || firebaseConfig.firestoreDatabaseId || HARDCODED_CONFIG.firestoreDatabaseId
 };
 
 const app = initializeApp({

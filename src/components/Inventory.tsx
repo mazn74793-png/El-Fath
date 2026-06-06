@@ -95,7 +95,7 @@ export default function Inventory({ products, onAddProduct, onUpdateProduct, onD
   // Handle Create or Edit Form submit
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name || !barcode || !costPrice || !sellingPrice || !quantity || !safetyStock) {
+    if (!name || !barcode || !sellingPrice || !quantity || !safetyStock) {
       alert('Please fill out all required invoice master fields!');
       return;
     }
@@ -104,7 +104,7 @@ export default function Inventory({ products, onAddProduct, onUpdateProduct, onD
       name,
       barcode,
       category,
-      costPrice: parseFloat(costPrice),
+      costPrice: costPrice ? parseFloat(costPrice) : 0,
       sellingPrice: parseFloat(sellingPrice),
       quantity: parseFloat(quantity),
       safetyStock: parseFloat(safetyStock),
@@ -136,7 +136,7 @@ export default function Inventory({ products, onAddProduct, onUpdateProduct, onD
     setName(prod.name);
     setBarcode(prod.barcode);
     setCategory(prod.category);
-    setCostPrice(prod.costPrice.toString());
+    setCostPrice(prod.costPrice ? prod.costPrice.toString() : '');
     setSellingPrice(prod.sellingPrice.toString());
     setQuantity(prod.quantity.toString());
     setSafetyStock(prod.safetyStock.toString());
@@ -522,7 +522,7 @@ export default function Inventory({ products, onAddProduct, onUpdateProduct, onD
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <label htmlFor="prod-cost-input" className="text-xs font-semibold text-gray-700">
-                      {lang === 'en' ? 'Cost Price (Wholesale) *' : 'سعر الشراء / التكلفة *'}
+                      {lang === 'en' ? 'Cost Price (Wholesale) (Optional)' : 'سعر الشراء / التكلفة (اختياري)'}
                     </label>
                     <div className="relative">
                       <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-xs">{symbol}</span>
@@ -530,7 +530,6 @@ export default function Inventory({ products, onAddProduct, onUpdateProduct, onD
                         id="prod-cost-input"
                         type="number"
                         step="0.01"
-                        required
                         value={costPrice}
                         onChange={(e) => setCostPrice(e.target.value)}
                         placeholder="0.00"
