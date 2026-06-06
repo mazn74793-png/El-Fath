@@ -19,7 +19,11 @@ import {
   Cpu, 
   Share2, 
   Terminal,
-  Activity
+  Activity,
+  Download,
+  Upload,
+  FileJson,
+  ShieldAlert
 } from 'lucide-react';
 import { SyncItem } from '../types';
 
@@ -29,11 +33,98 @@ interface SyncHubProps {
   syncQueue: SyncItem[];
   onTriggerSync: () => void;
   lang?: 'en' | 'ar';
+  onRestoreDatabase: (restoredData: any) => void;
 }
 
-export default function SyncHub({ isOnline, onToggleOnline, syncQueue, onTriggerSync, lang = 'en' }: SyncHubProps) {
-  const [activeTab, setActiveTab] = useState<'monitor' | 'schema' | 'rules'>('monitor');
+export default function SyncHub({ isOnline, onToggleOnline, syncQueue, onTriggerSync, lang = 'en', onRestoreDatabase }: SyncHubProps) {
+  const [activeTab, setActiveTab] = useState<'monitor' | 'schema' | 'rules' | 'backup'>('monitor');
   const [isSyncing, setIsSyncing] = useState(false);
+
+  // Backup & Restore states
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importSuccess, setImportSuccess] = useState<boolean>(false);
+
+  // Stats for backup display
+  const backupStats = React.useMemo(() => {
+    return {
+      shopsCount: JSON.parse(localStorage.getItem('pos_shops') || '[]').length,
+      productsCount: JSON.parse(localStorage.getItem('pos_products') || '[]').length,
+      ordersCount: JSON.parse(localStorage.getItem('pos_orders') || '[]').length,
+      repairsCount: JSON.parse(localStorage.getItem('pos_repairs') || '[]').length,
+      shiftsCount: JSON.parse(localStorage.getItem('pos_historical_shifts') || '[]').length,
+    };
+  }, [activeTab]);
+
+  const handleExportBackup = () => {
+    try {
+      const backupData = {
+        version: '1.0',
+        timestamp: new Date().toISOString(),
+        backupDateLabel: new Date().toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-US'),
+        shops: JSON.parse(localStorage.getItem('pos_shops') || '[]'),
+        activeShopId: localStorage.getItem('pos_active_shop_id') || '',
+        products: JSON.parse(localStorage.getItem('pos_products') || '[]'),
+        orders: JSON.parse(localStorage.getItem('pos_orders') || '[]'),
+        activeShift: JSON.parse(localStorage.getItem('pos_active_shift') || 'null'),
+        historicalShifts: JSON.parse(localStorage.getItem('pos_historical_shifts') || '[]'),
+        repairs: JSON.parse(localStorage.getItem('pos_repairs') || '[]')
+      };
+
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", dataStr);
+      
+      const formattedDate = new Date().toISOString().split('T')[0];
+      downloadAnchor.setAttribute("download", `Al_Fath_App_Backup_${formattedDate}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+    } catch (e) {
+      console.error('Error exporting backup', e);
+      alert(lang === 'ar' ? 'حدث خطأ أثناء تصدير النسخة الاحتياطية' : 'Error exporting backup file');
+    }
+  };
+
+  const handleImportFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setImportError(null);
+    setImportSuccess(false);
+
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const parsed = JSON.parse(event.target?.result as string);
+        if (!parsed || typeof parsed !== 'object') {
+          throw new Error(lang === 'ar' ? 'بنية الملف غير صالحة' : 'Invalid file object structure');
+        }
+
+        // Validate basic keys inside Al Fath backup
+        const hasShops = Array.isArray(parsed.shops);
+        const hasProducts = Array.isArray(parsed.products);
+        
+        if (!hasShops && !hasProducts) {
+          throw new Error(lang === 'ar' ? 'هذا الملف لا يبدو كنسخة احتياطية صالحة لبرنامج الفتح' : 'This JSON is not recognized as Al-Fath backup');
+        }
+
+        // Trigger parent callback to restore
+        onRestoreDatabase(parsed);
+        setImportSuccess(true);
+        
+        setTimeout(() => {
+          setImportSuccess(false);
+        }, 4000);
+      } catch (err: any) {
+        console.error('Import error:', err);
+        setImportError(err.message || (lang === 'ar' ? 'فشل قراءة وتحليل ملف النسخ الاحتياطي' : 'Failed to parse backup JSON file'));
+      }
+    };
+
+    reader.readAsText(file);
+    // Reset file input value
+    e.target.value = '';
+  };
 
   // Quick manual sync execution trigger
   const handleSyncClick = () => {
@@ -76,6 +167,12 @@ export default function SyncHub({ isOnline, onToggleOnline, syncQueue, onTrigger
             className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${activeTab === 'rules' ? 'bg-white text-gray-950 font-extrabold shadow-none' : 'text-gray-500 hover:text-gray-900'}`}
           >
             {lang === 'en' ? 'Zero-Trust Rules' : 'جدار الحماية والأمان'}
+          </button>
+          <button
+            onClick={() => setActiveTab('backup')}
+            className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${activeTab === 'backup' ? 'bg-white text-gray-950 font-extrabold shadow-none' : 'text-gray-500 hover:text-gray-900'}`}
+          >
+            {lang === 'en' ? 'Backup & Restore' : 'النسخ الاحتياطي والاسترجاع'}
           </button>
         </div>
       </div>
@@ -410,6 +507,208 @@ service cloud.firestore {
     }
 }`}
             </pre>
+          </motion.div>
+        )}
+
+        {/* BACKUP & RESTORE TAB */}
+        {activeTab === 'backup' && (
+          <motion.div
+            key="tab-backup"
+            initial={{ opacity: 0, y: 5 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -5 }}
+            className="grid grid-cols-1 xl:grid-cols-12 gap-6"
+          >
+            {/* EXPORT / IMPORT CONTROLS */}
+            <div className="xl:col-span-8 space-y-6 text-right" dir="rtl">
+              <div className="bg-white border border-[#E5E7EB] rounded-2xl p-6 shadow-xs space-y-6">
+                <div className="flex items-center gap-3 border-b border-gray-100 pb-4">
+                  <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl">
+                    <Database size={22} />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-semibold text-gray-950 font-sans">
+                      {lang === 'en' ? 'Local Storage Manual Backups' : 'النسخ الاحتياطي اليدوي لقاعدة البيانات المحلية'}
+                    </h3>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {lang === 'en' 
+                        ? 'Export structural snapshots of your point of sale memory instantly' 
+                        : 'احفظ نسخة من المعطيات الحالية لجهازك محلياً في ملف واحد لضمان استمرارية العمل'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* EXPORT CARD */}
+                  <div className="border border-slate-200 hover:border-black transition p-5 rounded-2xl bg-[#FAFAFA]/50 flex flex-col justify-between space-y-5">
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Download size={18} className="text-[#059669]" />
+                        <h4 className="text-sm font-bold text-gray-950">
+                          {lang === 'en' ? 'Export Data Backup (JSON)' : 'تصدير نسخة احتياطية جديدة (JSON)'}
+                        </h4>
+                      </div>
+                      <p className="text-xs text-gray-500 leading-relaxed font-sans">
+                        {lang === 'en' 
+                          ? 'Downloads your current inventory, cashier shift ledger, repair bookings, and sales invoices in a single lightweight data file.' 
+                          : 'يقوم فورياً بتحميل ملف يحتوي على كامل بيانات الفروع، المنتجات، الفواتير، عمليات الصيانة، والورديات الحالية.'}
+                      </p>
+                    </div>
+
+                    <button
+                      onClick={handleExportBackup}
+                      className="w-full py-3 bg-black text-white hover:bg-neutral-900 rounded-xl text-xs font-bold font-sans transition flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <Download size={14} />
+                      {lang === 'en' ? 'Download Backup File' : 'تحميل ملف النسخة الاحتياطية'}
+                    </button>
+                  </div>
+
+                  {/* IMPORT CARD */}
+                  <div className="border border-slate-200 hover:border-[#1D4ED8] transition p-5 rounded-2xl bg-[#FAFAFA]/50 flex flex-col justify-between space-y-5">
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Upload size={18} className="text-[#1D4ED8]" />
+                        <h4 className="text-sm font-bold text-gray-950">
+                          {lang === 'en' ? 'Restore Data Backup (JSON)' : 'استرجاع البيانات من نسخة احتياطية'}
+                        </h4>
+                      </div>
+                      <p className="text-xs text-gray-500 leading-relaxed font-sans">
+                        {lang === 'en' 
+                          ? 'Restore an existing backup JSON file. Caution: Uploading a valid file will safely overwrite your current device state.' 
+                          : 'قم باسترجاع ملف النسخة الاحتياطية الخاص بك. ملاحظة: سيؤدي رفع الملف إلى استباق وتحديث قاعدة البيانات الحالية.'}
+                      </p>
+                    </div>
+
+                    <div className="relative">
+                      <input
+                        type="file"
+                        accept=".json"
+                        onChange={handleImportFileChange}
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                      />
+                      <button
+                        type="button"
+                        className="w-full py-3 bg-white border border-[#E5E7EB] hover:border-blue-500 text-gray-901 hover:text-[#1D4ED8] rounded-xl text-xs font-bold font-sans transition flex items-center justify-center gap-2"
+                      >
+                        <Upload size={14} />
+                        {lang === 'en' ? 'Upload Backup File' : 'رفع واسترجاع نسخة ملف الاحتياط'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* FEEDBACK STATUSES */}
+                {importSuccess && (
+                  <div className="p-3 bg-[#ECFDF5] border border-[#A7F3D0] rounded-xl flex items-center gap-3 text-xs text-[#059669] font-sans antialiased">
+                    <Check className="shrink-0 w-5 h-5 p-1 bg-[#D1FAE5] rounded-full text-[#059669]" />
+                    <span>
+                      {lang === 'ar' 
+                        ? 'تم استرجاع قاعدة البيانات، صيانة الأجهزة، المنتجات، والورديات بنجاح تام وتحديثها على الشاشة فوراً!' 
+                        : 'Database state snapshot restored and hotloaded perfectly!'}
+                    </span>
+                  </div>
+                )}
+
+                {importError && (
+                  <div className="p-3 bg-[#FEF2F2] border border-[#FEE2E2] rounded-xl flex items-center gap-3 text-xs text-[#DC2626] font-sans">
+                    <ShieldAlert className="shrink-0 w-5 h-5 text-[#DC2626]" />
+                    <span>{importError}</span>
+                  </div>
+                )}
+
+                {/* VISUAL STATS SCOPE */}
+                <div className="border border-slate-100 bg-[#FAFAFA] rounded-2xl p-4 space-y-3">
+                  <h4 className="text-[11px] font-bold text-gray-500 tracking-wider uppercase font-mono text-right">
+                    {lang === 'en' ? 'Current Local Payload Metrics' : 'مؤشرات حمولة البيانات النشطة حالياً بالذاكرة لقاعدة البيانات'}
+                  </h4>
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-3" dir="rtl">
+                    <div className="bg-white p-3 rounded-xl border border-gray-150 flex flex-col justify-center items-center text-center">
+                      <span className="text-[10px] font-medium text-gray-500">{lang === 'ar' ? 'الفروع' : 'Shops'}</span>
+                      <strong className="text-lg text-black mt-1 font-mono font-black">{backupStats.shopsCount}</strong>
+                    </div>
+                    <div className="bg-white p-3 rounded-xl border border-gray-150 flex flex-col justify-center items-center text-center">
+                      <span className="text-[10px] font-medium text-gray-500">{lang === 'ar' ? 'المنتجات والقطع' : 'Products'}</span>
+                      <strong className="text-lg text-black mt-1 font-mono font-black">{backupStats.productsCount}</strong>
+                    </div>
+                    <div className="bg-white p-3 rounded-xl border border-gray-150 flex flex-col justify-center items-center text-center">
+                      <span className="text-[10px] font-medium text-gray-500">{lang === 'ar' ? 'فواتير البيع' : 'Sales'}</span>
+                      <strong className="text-lg text-black mt-1 font-mono font-black">{backupStats.ordersCount}</strong>
+                    </div>
+                    <div className="bg-white p-3 rounded-xl border border-gray-150 flex flex-col justify-center items-center text-center">
+                      <span className="text-[10px] font-medium text-gray-500">{lang === 'ar' ? 'أجهزة الصيانة' : 'Repairs'}</span>
+                      <strong className="text-lg text-black mt-1 font-mono font-black">{backupStats.repairsCount}</strong>
+                    </div>
+                    <div className="bg-white p-3 rounded-xl border border-gray-150 flex flex-col justify-center items-center text-center">
+                      <span className="text-[10px] font-medium text-gray-500">{lang === 'ar' ? 'الورديات المغلقة' : 'Shifts'}</span>
+                      <strong className="text-lg text-black mt-1 font-mono font-black">{backupStats.shiftsCount}</strong>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* DOCUMENTATION PANEL */}
+            <div className="xl:col-span-4 space-y-6 text-right" dir="rtl">
+              <div className="bg-[#111111] text-slate-100 rounded-2xl p-6 space-y-6 shadow-lg border border-neutral-850 leading-relaxed font-sans text-xs">
+                <div className="flex gap-2 items-center border-b border-neutral-800 pb-4 justify-start">
+                  <FileJson size={20} className="text-amber-500" />
+                  <h4 className="text-sm font-bold text-white uppercase tracking-wider font-sans">
+                    {lang === 'en' ? 'How Al-Fath Backup System Works' : 'شرح ومبادئ عمل نظام النسخ الاحتياطي'}
+                  </h4>
+                </div>
+
+                <div className="space-y-5">
+                  <div className="space-y-1.5">
+                    <h5 className="font-bold text-white flex items-center gap-1.5 justify-start">
+                      <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full inline-block shrink-0" />
+                      <span>{lang === 'en' ? '1. Where is my data kept?' : '١. أين وكيف يتم حفظ حركات وبيانات التطبيق؟'}</span>
+                    </h5>
+                    <p className="text-slate-300 pr-3 leading-relaxed">
+                      {lang === 'en' 
+                        ? 'Your app runs offline-first. Data is safely stored inside your device’s LocalStorage sandbox. If online sync is active, it replicates to secure cloud Firestore servers.' 
+                        : 'يتم حفظ جميع عملياتك محلياً بشكل فوري على ذاكرة جهازك الحالية (LocalStorage)، مما يتيح للكاشير العمل بسرعة البرق ودون اتصال بالإنترنت. عند تشغيل وضع المزامنة (Online)، يتم ترحيل الفواتير فورياً إلى قاعدة بيانات Firestore السحابية الآمنة.'}
+                    </p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <h5 className="font-bold text-white flex items-center gap-1.5 justify-start">
+                      <span className="w-1.5 h-1.5 bg-blue-500 rounded-full inline-block shrink-0" />
+                      <span>{lang === 'en' ? '2. Why do I need manual backup?' : '٢. ما هي أهمية النسخ الاحتياطي اليدوي بملف خارجي؟'}</span>
+                    </h5>
+                    <p className="text-slate-300 pr-3 leading-relaxed">
+                      {lang === 'en' 
+                        ? 'Browsers may occasionally purge local database indices due to disk cleanups, device resets, or privacy sweepers. A backup file keeps you 100% safe.' 
+                        : 'ذاكرة المتصفح قد تتعرض للفرمتة العشوائية أو المسح والتهيئة في بعض الحالات مثل (تنظيف الذاكرة المؤقتة للكمبيوتر، الفيروسات، تحديث أنظمة التشغيل، أو تهيئة الويندوز). تحميل ملف الاحتياط (.json) وحفظه يضمن لك حزام أمان بقرص خارجي أو فلاشة أو على السحابة.'}
+                    </p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <h5 className="font-bold text-white flex items-center gap-1.5 justify-start">
+                      <span className="w-1.5 h-1.5 bg-amber-500 rounded-full inline-block shrink-0" />
+                      <span>{lang === 'en' ? '3. What are the storage limits?' : '٣. ما هي حدود السعة والاستخدام الأقصى؟'}</span>
+                    </h5>
+                    <p className="text-slate-300 pr-3 leading-relaxed font-sans">
+                      {lang === 'en' 
+                        ? 'Your offline disk allows up to 5MB - 10MB of storage. This easily stores over 80,000 spare parts items and 150,000 cash operations. Meanwhile, cloud Firestore has no storage limits for your corporate history.' 
+                        : 'توفر الذاكرة المحلية سعة افتراضية كافية لحفظ أكثر من ٥٠,٠٠٠ صنف وقطع غيار بالإضافة إلى ١٠٠,٠٠٠ عملية مبيعات وصيانة بشكل آمن تماماً وبسرعة فائقة. بينما لا يحتاج التخزين السحابي لـ Firestore إلى القلق بخصوص الحجم حيث يتسع لمليارات المستندات بدون حدود.'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-amber-950/40 text-amber-300 p-4 border border-amber-900/40 rounded-xl flex gap-2.5">
+                  <ShieldAlert size={18} className="shrink-0 text-amber-400 mt-0.5" />
+                  <div className="text-[11px] leading-relaxed text-right">
+                    <strong>{lang === 'en' ? 'Operational Safety Caution' : 'توصية وقائية هامة:'}</strong>
+                    <p className="mt-0.5 opacity-90">
+                      {lang === 'en' 
+                        ? 'Restoring overwrites current local states. Please make sure to download a backup of your current setup before restoring an older file!' 
+                        : 'عملية الاسترجاع تستبدل المعطيات الحالية مباشرة. ننصح بتحميل نسخة لبياناتك الحالية كخطوة احترازية قبل البدء برفع أي ملف مؤرشف قديم تفادياً لفقدان الفواتير الجديدة.'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

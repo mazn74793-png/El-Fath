@@ -6,6 +6,15 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
+  collection, 
+  doc, 
+  setDoc, 
+  deleteDoc, 
+  onSnapshot 
+} from 'firebase/firestore';
+import { db, handleFirestoreError, OperationType } from './firebase';
+
+import { 
   TrendingUp, 
   Package, 
   ShoppingCart, 
@@ -150,215 +159,168 @@ export default function App() {
   
   // Multi-shop/branch states
   const [shops, setShops] = useState<Shop[]>([]);
-  const [activeShopId, setActiveShopId] = useState<string>('');
+  const [activeShopId, setActiveShopId] = useState<string>(() => {
+    return localStorage.getItem('pos_active_shop_id') || 'shop_default';
+  });
 
-  // Network synchronizer queue
-  const [isOnline, setIsOnline] = useState(true);
-  const [syncQueue, setSyncQueue] = useState<SyncItem[]>([]);
-
-  // 1. INITIAL LOADING SYSTEM
+  // Browser-native network state sensor for authentic status tracking
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
   useEffect(() => {
-    // One-time automatic migration to Al-Fath home appliances spare parts
-    const migrationFlagKey = 'pos_fath_migration_v3';
-    if (!localStorage.getItem(migrationFlagKey)) {
-      localStorage.clear();
-      localStorage.setItem(migrationFlagKey, 'true');
-    }
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
-    // Determine language to name default shop appropriately
-    const currentLang = localStorage.getItem('pos_language') || 'en';
+  const syncQueue: SyncItem[] = [];
 
-    // A. Shops list setup
-    let loadedShops: Shop[] = [];
-    try {
-      const storedShops = localStorage.getItem('pos_shops');
-      if (storedShops) {
-        const parsed = JSON.parse(storedShops);
-        if (Array.isArray(parsed)) {
-          loadedShops = parsed;
-        }
-      }
-    } catch (e) {
-      console.error('Error loading shops, falling back to default', e);
-    }
-
-    if (loadedShops.length === 0) {
-      loadedShops = [
-        {
+  // 1. INITIAL FIRESTORE REAL-TIME SUBSCRIPTIONS
+  useEffect(() => {
+    // A. Shops Subscription: Realtime Sync across devices
+    const unsubscribeShops = onSnapshot(collection(db, 'shops'), (snapshot) => {
+      const loadedShops: Shop[] = [];
+      snapshot.forEach((doc) => {
+        loadedShops.push(doc.data() as Shop);
+      });
+      if (loadedShops.length === 0) {
+        // First-time setup: Seed default shop to Firestore
+        const defaultShop: Shop = {
           id: 'shop_default',
-          name: currentLang === 'ar' ? 'الفتح لقطع غيار الأجهزة المنزلية' : 'Al-Fath Home Appliances Spares',
+          name: lang === 'ar' ? 'الفتح لقطع غيار الأجهزة المنزلية' : 'Al-Fath Home Appliances Spares',
           type: 'spare_parts',
           currency: 'EGP',
           createdAt: new Date().toISOString()
-        }
-      ];
-      localStorage.setItem('pos_shops', JSON.stringify(loadedShops));
-    }
-    setShops(loadedShops);
-
-    // B. Active shop ID
-    const storedActiveShopId = localStorage.getItem('pos_active_shop_id');
-    const finalActiveShopId = storedActiveShopId || 'shop_default';
-    setActiveShopId(finalActiveShopId);
-    if (!storedActiveShopId) {
-      localStorage.setItem('pos_active_shop_id', 'shop_default');
-    }
-
-    // C. Products (with automatic shopId migration if needed)
-    let loadedProducts: Product[] = [];
-    try {
-      const storedProducts = localStorage.getItem('pos_products');
-      if (storedProducts) {
-        const parsed = JSON.parse(storedProducts);
-        if (Array.isArray(parsed)) {
-          loadedProducts = parsed;
-        }
+        };
+        setDoc(doc(db, 'shops', 'shop_default'), defaultShop)
+          .catch(err => handleFirestoreError(err, OperationType.WRITE, 'shops/shop_default'));
+      } else {
+        setShops(loadedShops);
       }
-    } catch (e) {
-      console.error('Error loading products', e);
-    }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'shops');
+    });
 
-    if (loadedProducts.length === 0) {
-      loadedProducts = INITIAL_PRODUCTS.map(p => ({ ...p, shopId: 'shop_default' }));
-      localStorage.setItem('pos_products', JSON.stringify(loadedProducts));
-    }
-    const migratedProducts = loadedProducts.map(p => p && typeof p === 'object' && p.shopId ? p : { ...p, shopId: 'shop_default' });
-    setProducts(migratedProducts);
-
-    // D. Sales Orders (with automatic migration)
-    let loadedOrders: SalesOrder[] = [];
-    try {
-      const storedOrders = localStorage.getItem('pos_orders');
-      if (storedOrders) {
-        const parsed = JSON.parse(storedOrders);
-        if (Array.isArray(parsed)) {
-          loadedOrders = parsed.map((o: any) => o && typeof o === 'object' && o.shopId ? o : { ...o, shopId: 'shop_default' });
-        }
+    // B. Products Subscription: Realtime Sync across devices
+    const unsubscribeProducts = onSnapshot(collection(db, 'products'), (snapshot) => {
+      const loadedProducts: Product[] = [];
+      snapshot.forEach((doc) => {
+        loadedProducts.push(doc.data() as Product);
+      });
+      if (loadedProducts.length === 0) {
+        // Seed default catalog initially to Firestore
+        INITIAL_PRODUCTS.forEach((p) => {
+          const prod = { ...p, shopId: p.shopId || 'shop_default' };
+          setDoc(doc(db, 'products', prod.id), prod)
+            .catch(err => handleFirestoreError(err, OperationType.WRITE, `products/${prod.id}`));
+        });
+      } else {
+        setProducts(loadedProducts);
       }
-    } catch (e) {
-      console.error('Error loading orders', e);
-    }
-    setOrders(loadedOrders);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'products');
+    });
 
-    // E. Active Shift Session (with automatic migration)
-    let loadedActiveShift: Shift | null = null;
-    try {
-      const storedActiveShift = localStorage.getItem('pos_active_shift');
-      if (storedActiveShift) {
-        const parsedShift = JSON.parse(storedActiveShift);
-        if (parsedShift && typeof parsedShift === 'object') {
-          loadedActiveShift = parsedShift.shopId ? parsedShift : { ...parsedShift, shopId: 'shop_default' };
-        }
-      }
-    } catch (e) {
-      console.error('Error loading active shift', e);
-    }
-    setActiveShift(loadedActiveShift);
+    // C. Sales Orders Subscription: Realtime Sync across devices
+    const unsubscribeOrders = onSnapshot(collection(db, 'sales_orders'), (snapshot) => {
+      const loadedOrders: SalesOrder[] = [];
+      snapshot.forEach((doc) => {
+        loadedOrders.push(doc.data() as SalesOrder);
+      });
+      loadedOrders.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      setOrders(loadedOrders);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'sales_orders');
+    });
 
-    // F. Historical Shift Ledger (with automatic migration)
-    let loadedHistoricalShifts: Shift[] = [];
-    try {
-      const storedShifts = localStorage.getItem('pos_historical_shifts');
-      if (storedShifts) {
-        const parsed = JSON.parse(storedShifts);
-        if (Array.isArray(parsed)) {
-          loadedHistoricalShifts = parsed.map((s: any) => s && typeof s === 'object' && s.shopId ? s : { ...s, shopId: 'shop_default' });
-        }
-      }
-    } catch (e) {
-      console.error('Error loading historical shifts', e);
-    }
-    setHistoricalShifts(loadedHistoricalShifts);
+    // D. Repairs Subscription: Realtime Sync across devices
+    const unsubscribeRepairs = onSnapshot(collection(db, 'repairs'), (snapshot) => {
+      const loadedRepairs: RepairOrder[] = [];
+      snapshot.forEach((doc) => {
+        loadedRepairs.push(doc.data() as RepairOrder);
+      });
+      loadedRepairs.sort((a, b) => new Date(b.updatedAt || b.receivedDate).getTime() - new Date(a.updatedAt || a.receivedDate).getTime());
+      setRepairs(loadedRepairs);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'repairs');
+    });
 
-    // G. Sync queue
-    let loadedQueue: SyncItem[] = [];
-    try {
-      const storedQueue = localStorage.getItem('pos_sync_queue');
-      if (storedQueue) {
-        const parsed = JSON.parse(storedQueue);
-        if (Array.isArray(parsed)) {
-          loadedQueue = parsed;
-        }
-      }
-    } catch (e) {
-      console.error('Error loading sync queue', e);
-    }
-    setSyncQueue(loadedQueue);
+    return () => {
+      unsubscribeShops();
+      unsubscribeProducts();
+      unsubscribeOrders();
+      unsubscribeRepairs();
+    };
+  }, [lang]);
 
-    // H. Repairs/Maintenance list setup
-    let loadedRepairs: RepairOrder[] = [];
-    try {
-      const storedRepairs = localStorage.getItem('pos_repairs');
-      if (storedRepairs) {
-        const parsed = JSON.parse(storedRepairs);
-        if (Array.isArray(parsed)) {
-          loadedRepairs = parsed;
-        }
-      }
-    } catch (e) {
-      console.error('Error loading repairs from localStorage', e);
-    }
-    setRepairs(loadedRepairs);
-  }, []);
+  // E. Shifts Subscription linked to activeShopId (updates upon shop toggle)
+  useEffect(() => {
+    const unsubscribeShifts = onSnapshot(collection(db, 'shifts'), (snapshot) => {
+      const loadedShifts: Shift[] = [];
+      snapshot.forEach((doc) => {
+        loadedShifts.push(doc.data() as Shift);
+      });
+      
+      // Sort descending by openedAt
+      loadedShifts.sort((a, b) => new Date(b.openedAt).getTime() - new Date(a.openedAt).getTime());
+      
+      const openShifts = loadedShifts.filter(s => s.status === 'open');
+      const activeShopOpenShift = openShifts.find(s => s.shopId === activeShopId) || null;
+      
+      setActiveShift(activeShopOpenShift);
+      setHistoricalShifts(loadedShifts.filter(s => s.status === 'closed'));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'shifts');
+    });
 
-  // 2. HELPER TO SAVE TO LOCALSTORAGE
+    return () => unsubscribeShifts();
+  }, [activeShopId]);
+
+  // 2. HELPER TO SAVE CONFIGURATIONS (Internal settings like activeShopId)
   const saveState = (key: string, data: any) => {
     localStorage.setItem(key, JSON.stringify(data));
   };
 
-  // Add Mutation to Synchronization Queue if Offline
-  const queueSyncItem = (collection: SyncItem['collection'], action: SyncItem['action'], id: string, payload: any) => {
-    if (isOnline) return; // instant cloud processing simulation
-    
-    const newItem: SyncItem = {
-      id: "sync_" + Math.random().toString(36).substr(2, 9),
-      collection,
-      action,
-      documentId: id,
-      payload,
-      timestamp: new Date().toISOString()
-    };
-
-    const updatedQueue = [...syncQueue, newItem];
-    setSyncQueue(updatedQueue);
-    saveState('pos_sync_queue', updatedQueue);
-  };
-
-  // 3. HANDLERS: PRODUCTS INVENTORY
-  const handleAddProduct = (newProductData: Omit<Product, 'id' | 'updatedAt'>) => {
+  // 3. HANDLERS FOR PRODUCTS INVENTORY
+  const handleAddProduct = async (newProductData: Omit<Product, 'id' | 'updatedAt'>) => {
     const generatedId = "prod_" + Math.random().toString(36).substr(2, 9);
     const newProduct: Product = {
       ...newProductData,
       id: generatedId,
       updatedAt: new Date().toISOString(),
-      shopId: activeShopId // Linked to active shop
+      shopId: activeShopId
     };
-
-    const updatedProducts = [newProduct, ...products];
-    setProducts(updatedProducts);
-    saveState('pos_products', updatedProducts);
-
-    queueSyncItem('products', 'create', generatedId, newProduct);
+    try {
+      await setDoc(doc(db, 'products', generatedId), newProduct);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, `products/${generatedId}`);
+    }
   };
 
-  const handleUpdateProduct = (updatedProd: Product) => {
-    const updatedProducts = products.map(p => p.id === updatedProd.id ? updatedProd : p);
-    setProducts(updatedProducts);
-    saveState('pos_products', updatedProducts);
-
-    queueSyncItem('products', 'update', updatedProd.id, updatedProd);
+  const handleUpdateProduct = async (updatedProd: Product) => {
+    try {
+      await setDoc(doc(db, 'products', updatedProd.id), {
+        ...updatedProd,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `products/${updatedProd.id}`);
+    }
   };
 
-  const handleDeleteProduct = (id: string) => {
-    const updatedProducts = products.filter(p => p.id !== id);
-    setProducts(updatedProducts);
-    saveState('pos_products', updatedProducts);
-
-    queueSyncItem('products', 'delete', id, { id });
+  const handleDeleteProduct = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'products', id));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `products/${id}`);
+    }
   };
 
-  // 3B. HANDLERS: REPAIRS & MAINTENANCE
-  const handleAddRepair = (newRepairData: Omit<RepairOrder, 'id' | 'receivedDate' | 'updatedAt'>) => {
+  // 3B. HANDLERS FOR REPAIRS & MAINTENANCE
+  const handleAddRepair = async (newRepairData: Omit<RepairOrder, 'id' | 'receivedDate' | 'updatedAt'>) => {
     const generatedId = "repair_" + Math.random().toString(36).substr(2, 9);
     const newRepair: RepairOrder = {
       ...newRepairData,
@@ -366,32 +328,34 @@ export default function App() {
       receivedDate: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
-
-    const updatedRepairs = [newRepair, ...repairs];
-    setRepairs(updatedRepairs);
-    saveState('pos_repairs', updatedRepairs);
-
-    queueSyncItem('repairs', 'create', generatedId, newRepair);
+    try {
+      await setDoc(doc(db, 'repairs', generatedId), newRepair);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, `repairs/${generatedId}`);
+    }
   };
 
-  const handleUpdateRepair = (updatedRep: RepairOrder) => {
-    const updatedRepairs = repairs.map(r => r.id === updatedRep.id ? updatedRep : r);
-    setRepairs(updatedRepairs);
-    saveState('pos_repairs', updatedRepairs);
-
-    queueSyncItem('repairs', 'update', updatedRep.id, updatedRep);
+  const handleUpdateRepair = async (updatedRep: RepairOrder) => {
+    try {
+      await setDoc(doc(db, 'repairs', updatedRep.id), {
+        ...updatedRep,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `repairs/${updatedRep.id}`);
+    }
   };
 
-  const handleDeleteRepair = (id: string) => {
-    const updatedRepairs = repairs.filter(r => r.id !== id);
-    setRepairs(updatedRepairs);
-    saveState('pos_repairs', updatedRepairs);
-
-    queueSyncItem('repairs', 'delete', id, { id });
+  const handleDeleteRepair = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'repairs', id));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `repairs/${id}`);
+    }
   };
 
-  // 4. HANDLERS: SHIFTS MANAGEMENT
-  const handleOpenShift = (openingCash: number, cashierName: string) => {
+  // 4. HANDLERS FOR SHIFTS MANAGEMENT
+  const handleOpenShift = async (openingCash: number, cashierName: string) => {
     const newShiftId = "shift_" + Math.random().toString(36).substr(2, 9);
     const newShift: Shift = {
       id: newShiftId,
@@ -403,19 +367,18 @@ export default function App() {
       cardSales: 0,
       expectedCash: openingCash,
       status: 'open',
-      shopId: activeShopId // Linked to active shop
+      shopId: activeShopId
     };
-
-    setActiveShift(newShift);
-    saveState('pos_active_shift', newShift);
-
-    queueSyncItem('shifts', 'create', newShiftId, newShift);
+    try {
+      await setDoc(doc(db, 'shifts', newShiftId), newShift);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, `shifts/${newShiftId}`);
+    }
   };
 
-  const handleCloseShift = (actualCash: number) => {
+  const handleCloseShift = async (actualCash: number) => {
     if (!activeShift) return;
 
-    // Expected cash inside drawer (float + CASH orders. Visa/Card goes straight to bank)
     const activeShiftOrders = orders.filter(o => o.shiftId === activeShift.id);
     const cashSalesTotal = activeShiftOrders
       .filter(o => o.paymentMethod === 'cash')
@@ -438,58 +401,42 @@ export default function App() {
       status: 'closed'
     };
 
-    const updatedHistorical = [closedShift, ...historicalShifts];
-    setHistoricalShifts(updatedHistorical);
-    saveState('pos_historical_shifts', updatedHistorical);
-
-    setActiveShift(null);
-    localStorage.removeItem('pos_active_shift');
-
-    queueSyncItem('shifts', 'update', closedShift.id, closedShift);
+    try {
+      await setDoc(doc(db, 'shifts', closedShift.id), closedShift);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `shifts/${closedShift.id}`);
+    }
   };
 
   // 5. HANDLERS: POS ORDER PROCESS CHECKOUT (STOCK AUTO-DEDUCTION)
-  const handleCheckoutOrder = (orderDraft: Omit<SalesOrder, 'id' | 'createdAt'>) => {
+  const handleCheckoutOrder = async (orderDraft: Omit<SalesOrder, 'id' | 'createdAt'>) => {
     const orderId = "TKT-" + Math.floor(100000 + Math.random() * 900000);
     const newOrder: SalesOrder = {
       ...orderDraft,
       id: orderId,
       createdAt: new Date().toISOString(),
-      shopId: activeShopId // Linked to active shop
+      shopId: activeShopId
     };
 
-    // Auto-deduction of stock items from the products database
-    const updatedProducts = products.map(prod => {
-      const purchasedItem = orderDraft.items.find(item => item.productId === prod.id);
-      if (purchasedItem) {
-        // Enforce boundary safety floor to prevent negative counts
-        const remainingQty = Math.max(0, prod.quantity - purchasedItem.quantity);
-        return {
-          ...prod,
-          quantity: remainingQty,
-          updatedAt: new Date().toISOString()
-        };
+    try {
+      // Create new sales order document in Firestore
+      await setDoc(doc(db, 'sales_orders', orderId), newOrder);
+
+      // Mutate and decrement product inventories directly inside the cloud db
+      for (const item of orderDraft.items) {
+        const prod = products.find(p => p.id === item.productId);
+        if (prod) {
+          const remainingQty = Math.max(0, prod.quantity - item.quantity);
+          await setDoc(doc(db, 'products', prod.id), {
+            ...prod,
+            quantity: remainingQty,
+            updatedAt: new Date().toISOString()
+          });
+        }
       }
-      return prod;
-    });
-
-    setProducts(updatedProducts);
-    saveState('pos_products', updatedProducts);
-
-    const updatedOrders = [newOrder, ...orders];
-    setOrders(updatedOrders);
-    saveState('pos_orders', updatedOrders);
-
-    // Save orders mutation
-    queueSyncItem('sales_orders', 'create', orderId, newOrder);
-
-    // Sync Products mutation because quantity changed!
-    orderDraft.items.forEach(item => {
-      const resProduct = updatedProducts.find(p => p.id === item.productId);
-      if (resProduct) {
-        queueSyncItem('products', 'update', resProduct.id, resProduct);
-      }
-    });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `sales_orders/${orderId}`);
+    }
   };
 
   // Multi-shop/branch manager handlers
@@ -498,7 +445,7 @@ export default function App() {
     saveState('pos_active_shop_id', id);
   };
 
-  const handleAddShop = (name: string, type: Shop['type'], currency: Shop['currency']) => {
+  const handleAddShop = async (name: string, type: Shop['type'], currency: Shop['currency']) => {
     const newShopId = "shop_" + Math.random().toString(36).substr(2, 9);
     const newShop: Shop = {
       id: newShopId,
@@ -507,80 +454,120 @@ export default function App() {
       currency,
       createdAt: new Date().toISOString()
     };
-    const updatedShops = [...shops, newShop];
-    setShops(updatedShops);
-    saveState('pos_shops', updatedShops);
-    
-    // Switch to it immediately
-    setActiveShopId(newShopId);
-    saveState('pos_active_shop_id', newShopId);
-  };
-
-  const handleDeleteShop = (id: string) => {
-    if (id === 'shop_default') return; // protect default
-    const updatedShops = shops.filter(s => s.id !== id);
-    setShops(updatedShops);
-    saveState('pos_shops', updatedShops);
-    
-    if (activeShopId === id) {
-      setActiveShopId('shop_default');
-      saveState('pos_active_shop_id', 'shop_default');
+    try {
+      await setDoc(doc(db, 'shops', newShopId), newShop);
+      setActiveShopId(newShopId);
+      saveState('pos_active_shop_id', newShopId);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, `shops/${newShopId}`);
     }
   };
 
-  const handleUpdateShopName = (id: string, name: string) => {
-    const updatedShops = shops.map(s => s.id === id ? { ...s, name } : s);
-    setShops(updatedShops);
-    saveState('pos_shops', updatedShops);
+  const handleDeleteShop = async (id: string) => {
+    if (id === 'shop_default') return;
+    try {
+      await deleteDoc(doc(db, 'shops', id));
+      if (activeShopId === id) {
+        setActiveShopId('shop_default');
+        saveState('pos_active_shop_id', 'shop_default');
+      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `shops/${id}`);
+    }
   };
 
-  const handleResetDatabase = () => {
-    // 1. Clear LocalStorage keys
-    localStorage.removeItem('pos_shops');
-    localStorage.removeItem('pos_active_shop_id');
-    localStorage.removeItem('pos_products');
-    localStorage.removeItem('pos_orders');
-    localStorage.removeItem('pos_active_shift');
-    localStorage.removeItem('pos_historical_shifts');
-    localStorage.removeItem('pos_sync_queue');
-    localStorage.removeItem('pos_repairs');
+  const handleUpdateShopName = async (id: string, name: string) => {
+    const shop = shops.find(s => s.id === id);
+    if (!shop) return;
+    try {
+      await setDoc(doc(db, 'shops', id), {
+        ...shop,
+        name
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `shops/${id}`);
+    }
+  };
 
-    // Make sure migration flag is set so we don't clear again automatically
-    localStorage.setItem('pos_fath_migration_v3', 'true');
+  const handleResetDatabase = async () => {
+    try {
+      // 1. Delete all current products from Firestore
+      for (const p of products) {
+        await deleteDoc(doc(db, 'products', p.id));
+      }
+      // 2. Delete all current orders from Firestore
+      for (const o of orders) {
+        await deleteDoc(doc(db, 'sales_orders', o.id));
+      }
+      // 3. Delete all current repairs from Firestore
+      for (const r of repairs) {
+        await deleteDoc(doc(db, 'repairs', r.id));
+      }
+      // 4. Delete all current shifts from Firestore
+      if (activeShift) {
+        await deleteDoc(doc(db, 'shifts', activeShift.id));
+      }
+      for (const s of historicalShifts) {
+        await deleteDoc(doc(db, 'shifts', s.id));
+      }
 
-    // 2. Define fresh Fath store state
-    const defaultShop: Shop = {
-      id: 'shop_default',
-      name: 'الفتح لقطع غيار الأجهزة المنزلية',
-      type: 'spare_parts',
-      currency: 'EGP',
-      createdAt: new Date().toISOString()
-    };
-    
-    const freshShops = [defaultShop];
-    
-    // Import new INITIAL_PRODUCTS from data.ts (it already has spare parts)
-    const freshProducts = INITIAL_PRODUCTS.map(p => ({ ...p, shopId: 'shop_default' }));
+      // 5. Seed default shop and products
+      const defaultShop: Shop = {
+        id: 'shop_default',
+        name: 'الفتح لقطع غيار الأجهزة المنزلية',
+        type: 'spare_parts',
+        currency: 'EGP',
+        createdAt: new Date().toISOString()
+      };
+      await setDoc(doc(db, 'shops', 'shop_default'), defaultShop);
 
-    // 3. Update React States
-    setShops(freshShops);
-    setActiveShopId('shop_default');
-    setProducts(freshProducts);
-    setOrders([]);
-    setActiveShift(null);
-    setHistoricalShifts([]);
-    setSyncQueue([]);
-    setRepairs([]);
+      const freshProducts = INITIAL_PRODUCTS.map(p => ({ ...p, shopId: 'shop_default' }));
+      for (const p of freshProducts) {
+        await setDoc(doc(db, 'products', p.id), p);
+      }
 
-    // 4. Save defaults to localStorage for immediate persistence
-    localStorage.setItem('pos_shops', JSON.stringify(freshShops));
-    localStorage.setItem('pos_active_shop_id', 'shop_default');
-    localStorage.setItem('pos_products', JSON.stringify(freshProducts));
-    localStorage.setItem('pos_orders', JSON.stringify([]));
-    localStorage.setItem('pos_active_shift', JSON.stringify(null));
-    localStorage.setItem('pos_historical_shifts', JSON.stringify([]));
-    localStorage.setItem('pos_sync_queue', JSON.stringify([]));
-    localStorage.setItem('pos_repairs', JSON.stringify([]));
+      setActiveShopId('shop_default');
+      saveState('pos_active_shop_id', 'shop_default');
+    } catch (err) {
+      console.error('Error resetting database', err);
+    }
+  };
+
+  const handleRestoreDatabase = async (restoredData: any) => {
+    if (!restoredData || typeof restoredData !== 'object') {
+      throw new Error(lang === 'ar' ? 'ملف غير صالح' : 'Invalid file format');
+    }
+
+    try {
+      const newShops = Array.isArray(restoredData.shops) ? restoredData.shops : [];
+      const newProducts = Array.isArray(restoredData.products) ? restoredData.products : [];
+      const newOrders = Array.isArray(restoredData.orders) ? restoredData.orders : [];
+      const newHistoricalShifts = Array.isArray(restoredData.historicalShifts) ? restoredData.historicalShifts : [];
+      const newRepairs = Array.isArray(restoredData.repairs) ? restoredData.repairs : [];
+
+      // Bulk upload to Firestore
+      for (const s of newShops) {
+        await setDoc(doc(db, 'shops', s.id), s);
+      }
+      for (const p of newProducts) {
+        await setDoc(doc(db, 'products', p.id), p);
+      }
+      for (const o of newOrders) {
+        await setDoc(doc(db, 'sales_orders', o.id), o);
+      }
+      for (const s of newHistoricalShifts) {
+        await setDoc(doc(db, 'shifts', s.id), s);
+      }
+      if (restoredData.activeShift) {
+        await setDoc(doc(db, 'shifts', restoredData.activeShift.id), restoredData.activeShift);
+      }
+      for (const r of newRepairs) {
+        await setDoc(doc(db, 'repairs', r.id), r);
+      }
+    } catch (err) {
+      console.error('Error restoring database backup', err);
+      throw err;
+    }
   };
 
   const getArabicDayName = (dayIndex: number): string => {
@@ -610,8 +597,7 @@ export default function App() {
 
   // 6. SYNCHRONIZE OFFLINE DATA MUTATIONS FLUSH
   const handleTriggerSyncFlush = () => {
-    // simulate background uploading queue to cloud Firebase nodes
-    setSyncQueue([]);
+    // All Firestore operations synchronize automatically in the background
     localStorage.removeItem('pos_sync_queue');
   };
 
@@ -1044,6 +1030,7 @@ export default function App() {
                   syncQueue={syncQueue}
                   onTriggerSync={handleTriggerSyncFlush}
                   lang={lang}
+                  onRestoreDatabase={handleRestoreDatabase}
                 />
               )}
 

@@ -27,11 +27,12 @@
         "sellingPrice": { "type": "number", "description": "Retail price before taxes and discounts" },
         "quantity": { "type": "number", "description": "Current on-hand physical stock quantity" },
         "safetyStock": { "type": "number", "description": "The threshold limit below which a restock alert triggers" },
-        "expirationDate": { "type": "string", "format": "date", "description": "Optional expiration date (crucial for pharmacies)" },
+        "expirationDate": { "type": "string", "format": "date", "description": "Optional expiration date" },
         "updatedAt": { "type": "string", "format": "date-time", "description": "Last inventory sync timestamp" },
-        "updatedBy": { "type": "string", "description": "UID of the user who modified this item" }
+        "updatedBy": { "type": "string", "description": "UID of the user who modified this item" },
+        "shopId": { "type": "string", "description": "Associated shop branch ID" }
       },
-      "required": ["id", "name", "barcode", "costPrice", "sellingPrice", "quantity", "safetyStock", "updatedAt"]
+      "required": ["id", "name", "barcode", "costPrice", "sellingPrice", "quantity", "safetyStock", "updatedAt", "shopId"]
     },
     "SalesOrder": {
       "title": "SalesOrder",
@@ -48,9 +49,10 @@
         "tax": { "type": "number", "description": "Applied VAT/Sales taxes" },
         "total": { "type": "number", "description": "Final paid transactional invoice value" },
         "paymentMethod": { "type": "string", "enum": ["cash", "card"], "description": "Payment mode" },
-        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp of sales order confirmation" }
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp of sales order confirmation" },
+        "shopId": { "type": "string", "description": "Associated shop branch ID" }
       },
-      "required": ["id", "cashierId", "shiftId", "items", "subtotal", "total", "paymentMethod", "createdAt"]
+      "required": ["id", "cashierId", "shiftId", "items", "subtotal", "total", "paymentMethod", "createdAt", "shopId"]
     },
     "Shift": {
       "title": "Shift",
@@ -65,30 +67,75 @@
         "openingCash": { "type": "number", "description": "Initial physical cash inside drawer (float balance)" },
         "cashSales": { "type": "number", "description": "Sum total of cash payments recorded during shift" },
         "cardSales": { "type": "number", "description": "Sum total of credit card transactions checked out" },
-        "expectedCash": { "type": "number", "description": "Calculated expected final cash: openingNew + cashSales" },
+        "expectedCash": { "type": "number", "description": "Calculated expected final cash" },
         "actualCash": { "type": "number", "description": "Clerk raw physical cash count on close" },
         "discrepancy": { "type": "number", "description": "Variance between expected cash tally and raw counted cash" },
-        "status": { "type": "string", "enum": ["open", "closed"], "description": "State of shift registry drawer" }
+        "status": { "type": "string", "enum": ["open", "closed"], "description": "State of shift registry drawer" },
+        "shopId": { "type": "string", "description": "Associated shop branch ID" }
       },
-      "required": ["id", "cashierId", "cashierName", "openedAt", "openingCash", "status"]
+      "required": ["id", "cashierId", "cashierName", "openedAt", "openingCash", "status", "shopId"]
+    },
+    "RepairOrder": {
+      "title": "RepairOrder",
+      "description": "Customer device repair assignment details",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique database ID of repair job" },
+        "clientName": { "type": "string", "description": "Name of client owner" },
+        "clientPhone": { "type": "string", "description": "Phone number of client" },
+        "deviceName": { "type": "string", "description": "Name of appliance device" },
+        "problemDetails": { "type": "string", "description": "Diagnostic and hardware concerns" },
+        "partsNeeded": { "type": "string", "description": "Materials and segments to be ordered/changed" },
+        "cost": { "type": "number", "description": "Combined cost price of fixing device" },
+        "deposit": { "type": "number", "description": "Initial paid down-payment" },
+        "isDepositPaid": { "type": "boolean", "description": "Whether deposit billing is clear" },
+        "status": { "type": "string", "enum": ["pending", "in_progress", "ready", "delivered"], "description": "Current status" },
+        "notes": { "type": "string", "description": "Free notes reference" },
+        "receivedDate": { "type": "string", "format": "date", "description": "Date received" },
+        "expectedDeliveryDate": { "type": "string", "format": "date", "description": "Target checkout date" },
+        "shopId": { "type": "string", "description": "Associated shop branch ID" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Timestamp update" }
+      },
+      "required": ["id", "clientName", "clientPhone", "deviceName", "status", "shopId", "updatedAt"]
+    },
+    "Shop": {
+      "title": "Shop",
+      "description": "Store branch metadata settings",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique shop identifier" },
+        "name": { "type": "string", "description": "Official branch naming" },
+        "type": { "type": "string", "description": "Store domain category" },
+        "currency": { "type": "string", "description": "Local base currency" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Timestamp created" }
+      },
+      "required": ["id", "name", "type", "currency", "createdAt"]
     }
   },
   "firestore": {
     "users/{userId}": {
       "schema": "User",
-      "description": "Stores security credentials, profiles, and shop branch roles for operators."
+      "description": "Stores user security profiles."
     },
     "products/{productId}": {
       "schema": "Product",
-      "description": "Master list containing barcodes, pricing, stocks, safety thresholds, and expiration indicators."
+      "description": "Master list containing stocks, barcodes, and values."
     },
     "sales_orders/{orderId}": {
       "schema": "SalesOrder",
-      "description": "Transaction receipts recording checkout amounts, cashier references, and line list item breakdowns."
+      "description": "Completed transaction checkout invoices."
     },
     "shifts/{shiftId}": {
       "schema": "Shift",
-      "description": "Active sales registers logs and drawers float checkpoints to regulate cash audits."
+      "description": "Registers safe drawer counts and durations."
+    },
+    "repairs/{repairId}": {
+      "schema": "RepairOrder",
+      "description": "Tracks maintenance request logs, costs, and customer lines."
+    },
+    "shops/{shopId}": {
+      "schema": "Shop",
+      "description": "Configurations for multiple branch instances."
     }
   }
 }
