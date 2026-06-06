@@ -12,7 +12,7 @@ import {
   deleteDoc, 
   onSnapshot 
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from './firebase';
+import { db, handleFirestoreError, OperationType, sanitizeData } from './firebase';
 
 import { 
   TrendingUp, 
@@ -294,7 +294,7 @@ export default function App() {
       shopId: activeShopId
     };
     try {
-      await setDoc(doc(db, 'products', generatedId), newProduct);
+      await setDoc(doc(db, 'products', generatedId), sanitizeData(newProduct));
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, `products/${generatedId}`);
     }
@@ -302,10 +302,10 @@ export default function App() {
 
   const handleUpdateProduct = async (updatedProd: Product) => {
     try {
-      await setDoc(doc(db, 'products', updatedProd.id), {
+      await setDoc(doc(db, 'products', updatedProd.id), sanitizeData({
         ...updatedProd,
         updatedAt: new Date().toISOString()
-      });
+      }));
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `products/${updatedProd.id}`);
     }
@@ -329,7 +329,7 @@ export default function App() {
       updatedAt: new Date().toISOString()
     };
     try {
-      await setDoc(doc(db, 'repairs', generatedId), newRepair);
+      await setDoc(doc(db, 'repairs', generatedId), sanitizeData(newRepair));
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, `repairs/${generatedId}`);
     }
@@ -337,10 +337,10 @@ export default function App() {
 
   const handleUpdateRepair = async (updatedRep: RepairOrder) => {
     try {
-      await setDoc(doc(db, 'repairs', updatedRep.id), {
+      await setDoc(doc(db, 'repairs', updatedRep.id), sanitizeData({
         ...updatedRep,
         updatedAt: new Date().toISOString()
-      });
+      }));
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `repairs/${updatedRep.id}`);
     }
@@ -402,7 +402,7 @@ export default function App() {
     };
 
     try {
-      await setDoc(doc(db, 'shifts', closedShift.id), closedShift);
+      await setDoc(doc(db, 'shifts', closedShift.id), sanitizeData(closedShift));
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `shifts/${closedShift.id}`);
     }
@@ -420,18 +420,18 @@ export default function App() {
 
     try {
       // Create new sales order document in Firestore
-      await setDoc(doc(db, 'sales_orders', orderId), newOrder);
+      await setDoc(doc(db, 'sales_orders', orderId), sanitizeData(newOrder));
 
       // Mutate and decrement product inventories directly inside the cloud db
       for (const item of orderDraft.items) {
         const prod = products.find(p => p.id === item.productId);
         if (prod) {
           const remainingQty = Math.max(0, prod.quantity - item.quantity);
-          await setDoc(doc(db, 'products', prod.id), {
+          await setDoc(doc(db, 'products', prod.id), sanitizeData({
             ...prod,
             quantity: remainingQty,
             updatedAt: new Date().toISOString()
-          });
+          }));
         }
       }
     } catch (err) {

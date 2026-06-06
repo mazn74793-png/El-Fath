@@ -100,7 +100,7 @@ export default function Inventory({ products, onAddProduct, onUpdateProduct, onD
       return;
     }
 
-    const payload = {
+    const payload: Omit<Product, 'id' | 'updatedAt'> = {
       name,
       barcode,
       category,
@@ -108,15 +108,22 @@ export default function Inventory({ products, onAddProduct, onUpdateProduct, onD
       sellingPrice: parseFloat(sellingPrice),
       quantity: parseFloat(quantity),
       safetyStock: parseFloat(safetyStock),
-      expirationDate: expirationDate || undefined
     };
 
+    if (expirationDate) {
+      payload.expirationDate = expirationDate;
+    }
+
     if (editingProduct) {
-      onUpdateProduct({
+      const updated: Product = {
         ...editingProduct,
         ...payload,
         updatedAt: new Date().toISOString()
-      });
+      };
+      if (!expirationDate) {
+        delete updated.expirationDate;
+      }
+      onUpdateProduct(updated);
     } else {
       onAddProduct(payload);
     }

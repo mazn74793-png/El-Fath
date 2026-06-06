@@ -45,6 +45,25 @@ async function testConnection() {
 }
 testConnection();
 
+/**
+ * Recursively removes all undefined fields from an object to satisfy Firestore SDK constraints.
+ */
+export function sanitizeData<T>(obj: T): T {
+  if (obj === null || typeof obj !== 'object') {
+    return obj;
+  }
+  const result: any = Array.isArray(obj) ? [] : {};
+  for (const key in obj) {
+    if (Object.prototype.hasOwnProperty.call(obj, key)) {
+      const val = (obj as any)[key];
+      if (val !== undefined) {
+        result[key] = typeof val === 'object' ? sanitizeData(val) : val;
+      }
+    }
+  }
+  return result as T;
+}
+
 // Global Operations Error Handlers
 export enum OperationType {
   CREATE = 'create',
