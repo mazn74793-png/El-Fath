@@ -34,9 +34,28 @@ interface SyncHubProps {
   onTriggerSync: () => void;
   lang?: 'en' | 'ar';
   onRestoreDatabase: (restoredData: any) => void;
+  shops?: any[];
+  products?: any[];
+  orders?: any[];
+  repairs?: any[];
+  historicalShifts?: any[];
+  activeShift?: any;
 }
 
-export default function SyncHub({ isOnline, onToggleOnline, syncQueue, onTriggerSync, lang = 'en', onRestoreDatabase }: SyncHubProps) {
+export default function SyncHub({ 
+  isOnline, 
+  onToggleOnline, 
+  syncQueue, 
+  onTriggerSync, 
+  lang = 'en', 
+  onRestoreDatabase,
+  shops,
+  products,
+  orders,
+  repairs,
+  historicalShifts,
+  activeShift
+}: SyncHubProps) {
   const [activeTab, setActiveTab] = useState<'monitor' | 'schema' | 'rules' | 'backup'>('monitor');
   const [isSyncing, setIsSyncing] = useState(false);
 
@@ -47,13 +66,13 @@ export default function SyncHub({ isOnline, onToggleOnline, syncQueue, onTrigger
   // Stats for backup display
   const backupStats = React.useMemo(() => {
     return {
-      shopsCount: JSON.parse(localStorage.getItem('pos_shops') || '[]').length,
-      productsCount: JSON.parse(localStorage.getItem('pos_products') || '[]').length,
-      ordersCount: JSON.parse(localStorage.getItem('pos_orders') || '[]').length,
-      repairsCount: JSON.parse(localStorage.getItem('pos_repairs') || '[]').length,
-      shiftsCount: JSON.parse(localStorage.getItem('pos_historical_shifts') || '[]').length,
+      shopsCount: shops ? shops.length : JSON.parse(localStorage.getItem('pos_shops') || '[]').length,
+      productsCount: products ? products.length : JSON.parse(localStorage.getItem('pos_products') || '[]').length,
+      ordersCount: orders ? orders.length : JSON.parse(localStorage.getItem('pos_orders') || '[]').length,
+      repairsCount: repairs ? repairs.length : JSON.parse(localStorage.getItem('pos_repairs') || '[]').length,
+      shiftsCount: historicalShifts ? historicalShifts.length : JSON.parse(localStorage.getItem('pos_historical_shifts') || '[]').length,
     };
-  }, [activeTab]);
+  }, [activeTab, shops, products, orders, repairs, historicalShifts]);
 
   const handleExportBackup = () => {
     try {
@@ -61,13 +80,13 @@ export default function SyncHub({ isOnline, onToggleOnline, syncQueue, onTrigger
         version: '1.0',
         timestamp: new Date().toISOString(),
         backupDateLabel: new Date().toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-US'),
-        shops: JSON.parse(localStorage.getItem('pos_shops') || '[]'),
+        shops: shops || JSON.parse(localStorage.getItem('pos_shops') || '[]'),
         activeShopId: localStorage.getItem('pos_active_shop_id') || '',
-        products: JSON.parse(localStorage.getItem('pos_products') || '[]'),
-        orders: JSON.parse(localStorage.getItem('pos_orders') || '[]'),
-        activeShift: JSON.parse(localStorage.getItem('pos_active_shift') || 'null'),
-        historicalShifts: JSON.parse(localStorage.getItem('pos_historical_shifts') || '[]'),
-        repairs: JSON.parse(localStorage.getItem('pos_repairs') || '[]')
+        products: products || JSON.parse(localStorage.getItem('pos_products') || '[]'),
+        orders: orders || JSON.parse(localStorage.getItem('pos_orders') || '[]'),
+        activeShift: activeShift !== undefined ? activeShift : JSON.parse(localStorage.getItem('pos_active_shift') || 'null'),
+        historicalShifts: historicalShifts || JSON.parse(localStorage.getItem('pos_historical_shifts') || '[]'),
+        repairs: repairs || JSON.parse(localStorage.getItem('pos_repairs') || '[]')
       };
 
       const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData, null, 2));

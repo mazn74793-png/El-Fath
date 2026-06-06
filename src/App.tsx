@@ -279,6 +279,45 @@ export default function App() {
     return () => unsubscribeShifts();
   }, [activeShopId]);
 
+  // 1.5 KEEP LOCAL STORAGE SYNCED WITH FIRESTORE FOR RESILIENT BACKUPS & OFFLINE POWER
+  useEffect(() => {
+    if (shops.length > 0) {
+      localStorage.setItem('pos_shops', JSON.stringify(shops));
+    }
+  }, [shops]);
+
+  useEffect(() => {
+    if (products.length > 0) {
+      localStorage.setItem('pos_products', JSON.stringify(products));
+    }
+  }, [products]);
+
+  useEffect(() => {
+    if (orders.length > 0) {
+      localStorage.setItem('pos_orders', JSON.stringify(orders));
+    }
+  }, [orders]);
+
+  useEffect(() => {
+    if (repairs.length > 0) {
+      localStorage.setItem('pos_repairs', JSON.stringify(repairs));
+    }
+  }, [repairs]);
+
+  useEffect(() => {
+    if (historicalShifts.length > 0) {
+      localStorage.setItem('pos_historical_shifts', JSON.stringify(historicalShifts));
+    }
+  }, [historicalShifts]);
+
+  useEffect(() => {
+    if (activeShift) {
+      localStorage.setItem('pos_active_shift', JSON.stringify(activeShift));
+    } else {
+      localStorage.removeItem('pos_active_shift');
+    }
+  }, [activeShift]);
+
   // 2. HELPER TO SAVE CONFIGURATIONS (Internal settings like activeShopId)
   const saveState = (key: string, data: any) => {
     localStorage.setItem(key, JSON.stringify(data));
@@ -1037,6 +1076,12 @@ export default function App() {
                   onTriggerSync={handleTriggerSyncFlush}
                   lang={lang}
                   onRestoreDatabase={handleRestoreDatabase}
+                  shops={shops}
+                  products={products}
+                  orders={orders}
+                  repairs={repairs}
+                  historicalShifts={historicalShifts}
+                  activeShift={activeShift}
                 />
               )}
 
