@@ -211,9 +211,9 @@ export default function POS({ products, orders, activeShift, onCheckout, onNavig
       return acc + (item.product.sellingPrice * item.quantity - item.discount);
     }, 0);
 
-    const taxRate = 0.05; // 5% VAT
-    const tax = parseFloat((subtotal * taxRate).toFixed(2));
-    const grandTotal = Math.max(0, parseFloat((subtotal + tax - overallDiscount).toFixed(2)));
+    const taxRate = 0; // Tax completely removed per user request
+    const tax = 0;
+    const grandTotal = Math.max(0, parseFloat((subtotal - overallDiscount).toFixed(2)));
 
     return {
       subtotal,
@@ -226,7 +226,7 @@ export default function POS({ products, orders, activeShift, onCheckout, onNavig
   const gridProducts = React.useMemo(() => {
     return products.filter(p => {
       const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.barcode.includes(searchQuery);
-      const matchesCat = selectedCategory === 'All Categories' || p.category === selectedCategory;
+      const matchesCat = selectedCategory === 'All Categories' || selectedCategory === 'جميع الأقسام' || p.category === selectedCategory;
       return matchesSearch && matchesCat;
     });
   }, [products, searchQuery, selectedCategory]);
@@ -699,7 +699,7 @@ export default function POS({ products, orders, activeShift, onCheckout, onNavig
           <div className="space-y-1.5 text-xs text-gray-600">
             {/* Subtotal */}
             <div className="flex justify-between font-medium">
-              <span>{lang === 'en' ? 'Subtotal (Before taxes)' : 'المجموع الفرعي (قبل الضريبة)'}</span>
+              <span>{lang === 'en' ? 'Subtotal' : 'المجموع الفرعي'}</span>
               <span className="font-mono text-gray-800">{invoiceCalculations.subtotal.toFixed(2)} {symbol}</span>
             </div>
 
@@ -719,12 +719,6 @@ export default function POS({ products, orders, activeShift, onCheckout, onNavig
                   className="w-16 px-1.5 py-0.5 text-right border border-gray-200 focus:border-black rounded outline-none font-mono text-xs font-bold"
                 />
               </div>
-            </div>
-
-            {/* Applied 5% VAT Sales Tax */}
-            <div className="flex justify-between text-gray-500">
-              <span>{lang === 'en' ? 'Sales VAT tax (5.0%)' : 'ضريبة القيمة المضافة ومبيعات (5.0%)'}</span>
-              <span className="font-mono">{invoiceCalculations.tax.toFixed(2)} {symbol}</span>
             </div>
           </div>
 
@@ -947,11 +941,7 @@ export default function POS({ products, orders, activeShift, onCheckout, onNavig
                     <span>{lang === 'en' ? 'Discount:' : 'الخصم الكلي:'}</span>
                     <span>-{lastPrintedInvoice.discount.toFixed(2)} {symbol}</span>
                   </div>
-                  <div className="flex justify-between font-medium">
-                    <span>{lang === 'en' ? 'Tax (5.0%):' : 'الضريبة (٥.٠٪):'}</span>
-                    <span>{lastPrintedInvoice.tax.toFixed(2)} {symbol}</span>
-                  </div>
-                  <div className="flex justify-between text-xs font-bold text-gray-900 border-t border-gray-200 pt-1">
+                  <div className="flex justify-between text-xs font-bold text-gray-900 border-t border-gray-200 pt-1 font-sans">
                     <span>{lang === 'en' ? 'NET GRAND:' : 'الصافي الكلي:'}</span>
                     <span>{lastPrintedInvoice.total.toFixed(2)} {symbol}</span>
                   </div>

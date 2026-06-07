@@ -156,6 +156,11 @@ export default function App() {
   const [activeShift, setActiveShift] = useState<Shift | null>(null);
   const [historicalShifts, setHistoricalShifts] = useState<Shift[]>([]);
   const [repairs, setRepairs] = useState<RepairOrder[]>([]);
+
+  // Core database connection initialization readiness tracking
+  const [isShopsReady, setIsShopsReady] = useState(false);
+  const [isProductsReady, setIsProductsReady] = useState(false);
+  const [isShiftsReady, setIsShiftsReady] = useState(false);
   
   // Multi-shop/branch states
   const [shops, setShops] = useState<Shop[]>([]);
@@ -197,11 +202,14 @@ export default function App() {
         };
         setDoc(doc(db, 'shops', 'shop_default'), defaultShop)
           .catch(err => handleFirestoreError(err, OperationType.WRITE, 'shops/shop_default'));
+        setIsShopsReady(true);
       } else {
         setShops(loadedShops);
+        setIsShopsReady(true);
       }
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'shops');
+      setIsShopsReady(true);
     });
 
     // B. Products Subscription: Realtime Sync across devices
@@ -217,11 +225,14 @@ export default function App() {
           setDoc(doc(db, 'products', prod.id), prod)
             .catch(err => handleFirestoreError(err, OperationType.WRITE, `products/${prod.id}`));
         });
+        setIsProductsReady(true);
       } else {
         setProducts(loadedProducts);
+        setIsProductsReady(true);
       }
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'products');
+      setIsProductsReady(true);
     });
 
     // C. Sales Orders Subscription: Realtime Sync across devices
@@ -268,12 +279,14 @@ export default function App() {
       loadedShifts.sort((a, b) => new Date(b.openedAt).getTime() - new Date(a.openedAt).getTime());
       
       const openShifts = loadedShifts.filter(s => s.status === 'open');
-      const activeShopOpenShift = openShifts.find(s => s.shopId === activeShopId) || null;
+      const activeShopOpenShift = openShifts.find(s => s.shopId === activeShopId) || openShifts[0] || null;
       
       setActiveShift(activeShopOpenShift);
       setHistoricalShifts(loadedShifts.filter(s => s.status === 'closed'));
+      setIsShiftsReady(true);
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'shifts');
+      setIsShiftsReady(true);
     });
 
     return () => unsubscribeShifts();
@@ -655,6 +668,41 @@ export default function App() {
   const activeScopedHistoricalShifts = historicalShifts.filter(s => s.shopId === activeShopId);
   const activeScopedRepairs = repairs.filter(r => r.shopId === activeShopId);
   const pendingRepairsCount = activeScopedRepairs.filter(r => r.status !== 'delivered').length;
+
+  const isInitializing = !isShopsReady || !isProductsReady || !isShiftsReady;
+
+  if (isInitializing) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen w-screen bg-[#0B0F19] text-white font-sans selection:bg-indigo-500/30 overflow-hidden" dir={lang === 'ar' ? 'rtl' : 'ltr'}>
+        <div className="flex flex-col items-center gap-6 max-w-sm px-6 text-center">
+          {/* Animated Spinner Icon */}
+          <div className="relative flex items-center justify-center">
+            <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center animate-pulse">
+              <RefreshCw className="w-8 h-8 text-emerald-400 animate-spin" style={{ animationDuration: '3s' }} />
+            </div>
+            <div className="absolute -inset-1 rounded-2xl bg-gradient-to-r from-emerald-500 to-indigo-500 opacity-20 blur-sm animate-pulse"></div>
+          </div>
+
+          <div className="space-y-2">
+            <h2 className="text-xl font-bold tracking-tight text-white font-sans font-sans">
+              {lang === 'ar' ? 'جاري الاتصال ومزامنة البيانات...' : 'Connecting to database...'}
+            </h2>
+            <p className="text-xs text-gray-400 leading-relaxed font-sans font-sans">
+              {lang === 'ar' 
+                ? 'جاري مزامنة الوردية والمنتجات الحالية تلقائياً لتجنب التكرار وضمان تطابق البيانات لدى جميع الأجهزة.' 
+                : 'Synchronizing current shift and catalogue to avoid duplication & guarantee multi-device real-time integrity.'}
+            </p>
+          </div>
+
+          {/* Secure, minimal status pill */}
+          <div className="px-3.5 py-1.5 bg-[#1F2937]/50 rounded-full border border-[#374151]/60 text-[10px] font-mono text-gray-400 select-none flex items-center gap-2">
+            <div className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`}></div>
+            <span>{isOnline ? (lang === 'ar' ? 'خوادم الفتح متصلة' : 'AL-FATH ENDPOINT LIVE') : (lang === 'ar' ? 'غير متصل بالإنترنت' : 'OFFLINE MODE')}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-screen bg-[#F8F9FA] text-[#1A1A1A] font-sans overflow-hidden">
